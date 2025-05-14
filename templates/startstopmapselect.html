@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Enter and Leave Points</title>
+    <script src="https://maps.googleapis.com/maps/api/js?key={{ api_key }}&callback=initMap" async defer></script>
+    <script>
+        var map;
+        var enterPoint = null;
+        var leavePoint = null;
+        var samePoint = true;
+
+        function initMap(){
+            console.log("Map center: {{ lat }}, {{ lng }}");
+            var mapOptions = {
+                center: {lat: {{ lat }}, lng: {{ lng }}},
+                zoom: 14
+            };
+
+            map = new google.maps.Map(document.getElementById('map'), mapOptions);
+
+            // Set up event listeners for setting enter and leave points
+            map.addListener('click', function(event) {
+                if (!enterPoint) {
+                    enterPoint = event.latLng;
+                    new google.maps.Marker({
+                        position: enterPoint,
+                        map: map,
+                        title: 'Enter Point'
+                    });
+                    alert("Enter point selected. Select a leave point.");
+                    if (samePoint) {
+                        leavePoint = enterPoint;
+                        alert("Leave point is the same as enter point.");
+                    }
+                } else if (!leavePoint && !samePoint) {
+                    leavePoint = event.latLng;
+                    new google.maps.Marker({
+                        position: leavePoint,
+                        map: map,
+                        title: 'Leave Point'
+                    });
+                    alert("Leave point selected.");
+                }
+            });
+        }
+
+        function toggleSamePoint() {
+            samePoint = document.getElementById("same-point-checkbox").checked;
+            if (samePoint && enterPoint) {
+                leavePoint = enterPoint;
+                alert("Leave point is the same as enter point.");
+            } else {
+                leavePoint = null;
+            }
+        }
+
+        // Function to send the selected points back to the server
+        function submitRoute() {
+            if (enterPoint && (leavePoint || samePoint)) {
+                // Send coordinates
+                var data = {
+                    enter_lat: enterPoint.lat(),
+                    enter_lng: enterPoint.lng(),
+                    leave_lat: leavePoint ? leavePoint.lat() : enterPoint.lat(),
+                    leave_lng: leavePoint ? leavePoint.lng() : enterPoint.lng()
+                };
+
+                fetch("/save_points", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(data)
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data);
+                    alert("Enter/Leave saved successfully!");
+                    window.location.href = `/result?boundary_id=${data.boundary_id}`;
+                });
+            } else {
+                alert("Please select both enter and leave points.");
+            }
+        }
+    </script>
+</head>
+<body onload="initMap()">
+    <h2>Select Enter and Leave Points</h2>
+    <label>
+        <input type="checkbox" id="same-point-checkbox" checked onchange="toggleSamePoint()"> Use the same point for enter and leave
+    </label>
+    <div id="map" style="height: 500px; width: 100%;"></div>
+    <button onclick="submitRoute()">Save Points</button>
+</body>
+</html>

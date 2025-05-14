@@ -1,0 +1,287 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Road Boundaries</title>
+    
+    <!-- Google Maps API Script -->
+    <script async defer src="https://maps.googleapis.com/maps/api/js?key={{ api_key }}&libraries=places,marker&callback=initMap"></script>
+    
+    <!-- D3.js Library -->
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+
+    <style>
+        #map {
+            width: 100%;
+            height: 500px;
+        }
+        #loading-spinner {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 16px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 16px solid #3498db;
+            width: 120px;
+            height: 120px;
+            animation: spin 2s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+
+    <script>
+        let map;
+        let selectedCorners = [];
+        let polygon;
+        let selectedNodes = new Set();
+        let graphData;
+
+        // Initialize the map
+        function initMap() {
+            const center = { lat: {{ lat | default(41.7508) }}, lng: {{ lng | default(-88.1535) }} }; // Default center
+            map = new google.maps.Map(document.getElementById("map"), {
+                center: center,
+                zoom: 12,
+                mapId: '6d69429dcb072d7d' // Map ID for styling (ensure it's valid)
+            });
+
+            // Listen for map clicks to select the 4 corners
+            map.addListener("click", function(event) {
+                if (selectedCorners.length < 4) {
+                    const lat = event.latLng.lat();
+                    const lng = event.latLng.lng();
+                    selectedCorners.push({ lat, lng });
+                    updateCornerList();
+                    addAdvancedMarker(lat, lng);
+                    if (selectedCorners.length === 4) {
+                        drawPolygon();
+                    }
+                }
+            });
+        }
+
+        // Add AdvancedMarker on the map at given lat, lng
+        function addAdvancedMarker(lat, lng) {
+            const contentDiv = document.createElement('div');
+            contentDiv.style.backgroundColor = 'red';
+            contentDiv.style.color = 'white';
+            contentDiv.style.padding = '5px';
+            contentDiv.textContent = 'X';
+
+            new google.maps.marker.AdvancedMarkerElement({
+                position: { lat, lng },
+                map: map,
+                title: `Corner at: ${lat.toFixed(4)}, ${lng.toFixed(4)}`,
+                content: contentDiv,
+            });
+        }
+
+        // Update corner list on the page
+        function updateCornerList() {
+            for (let i = 0; i < 4; i++) {
+                const cornerElement = document.getElementById(`corner-${i + 1}`);
+                if (selectedCorners[i]) {
+                    cornerElement.textContent = `Corner ${i + 1}: Lat: ${selectedCorners[i].lat}, Lng: ${selectedCorners[i].lng}`;
+                } else {
+                    cornerElement.textContent = `Corner ${i + 1}: Not selected`;
+                }
+            }
+
+            if (selectedCorners.length === 4) {
+                document.getElementById("submit-btn").disabled = false;
+            }
+        }
+
+        // Draw the polygon using the selected corners
+        function drawPolygon() {
+            if (polygon) {
+                polygon.setMap(null); // Remove the previous polygon if any
+            }
+
+            const polygonPath = selectedCorners.map(corner => new google.maps.LatLng(corner.lat, corner.lng));
+
+            polygon = new google.maps.Polygon({
+                paths: polygonPath,
+                strokeColor: '#FF0000',
+                strokeOpacity: 0.8,
+                strokeWeight: 2,
+                fillColor: '#FF0000',
+                fillOpacity: 0.35
+            });
+            polygon.setMap(map);
+        }
+
+        // Submit the selected boundaries
+        function submitBoundaries() {
+            if (selectedCorners.length !== 4) {
+                alert("Please select exactly 4 corners.");
+                return;
+            }
+
+            // Show loading spinner and disable submit button
+            document.getElementById("loading-spinner").style.display = "block";
+            document.getElementById("submit-btn").disabled = true;
+
+            fetch("/process_boundaries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ corners: selectedCorners }),
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json(); // Expect JSON response
+            })
+            .then(data => {
+                console.log("Boundary ID:", data.boundary_id);
+                fetchGraphData(data.boundary_id);
+            })
+            .catch(error => {
+                console.error("Error:", error);
+                alert("An error occurred while processing the boundaries. Please try again.");
+                // Hide loading spinner and enable submit button
+                document.getElementById("loading-spinner").style.display = "none";
+                document.getElementById("submit-btn").disabled = false;
+            });
+        }
+
+        // Fetch the graph data
+        function fetchGraphData(boundary_id) {
+            fetch(`/graph-data?boundary_id=${boundary_id}`)
+                .then(response => response.json())
+                .then(data => {
+                    graphData = data;
+                    // overlayGraphOnMap(); // Commented out for now
+                    // Hide loading spinner
+                    document.getElementById("loading-spinner").style.display = "none";
+                })
+                .catch(error => {
+                    console.error("Error:", error);
+                    alert("An error occurred while fetching the graph data. Please try again.");
+                    // Hide loading spinner and enable submit button
+                    document.getElementById("loading-spinner").style.display = "none";
+                    document.getElementById("submit-btn").disabled = false;
+                });
+        }
+
+        /* Commented out node selection and deletion functionality for now
+        // Overlay the graph on the map
+        function overlayGraphOnMap() {
+            const overlay = new google.maps.OverlayView();
+
+            overlay.onAdd = function() {
+                const layer = d3.select(this.getPanes().overlayLayer).append("div").attr("class", "stations");
+
+                overlay.draw = function() {
+                    const projection = this.getProjection();
+                    const padding = 10;
+
+                    const marker = layer.selectAll("svg")
+                        .data(graphData.nodes)
+                        .each(transform)
+                        .enter().append("svg")
+                        .each(transform)
+                        .attr("class", "marker");
+
+                    marker.append("circle")
+                        .attr("r", 5)
+                        .attr("cx", padding)
+                        .attr("cy", padding)
+                        .on("click", function(event, d) {
+                            onNodeClick(event, d.id);
+                        });
+
+                    function transform(d) {
+                        d = new google.maps.LatLng(d.lat, d.lon);
+                        d = projection.fromLatLngToDivPixel(d);
+                        return d3.select(this)
+                            .style("left", (d.x - padding) + "px")
+                            .style("top", (d.y - padding) + "px");
+                    }
+
+                    const link = layer.selectAll(".link")
+                        .data(graphData.links)
+                        .enter().append("line")
+                        .attr("class", "link")
+                        .attr("x1", function(d) { return projection.fromLatLngToDivPixel(new google.maps.LatLng(d.source.lat, d.source.lon)).x; })
+                        .attr("y1", function(d) { return projection.fromLatLngToDivPixel(new google.maps.LatLng(d.source.lat, d.source.lon)).y; })
+                        .attr("x2", function(d) { return projection.fromLatLngToDivPixel(new google.maps.LatLng(d.target.lat, d.target.lon)).x; })
+                        .attr("y2", function(d) { return projection.fromLatLngToDivPixel(new google.maps.LatLng(d.target.lat, d.target.lon)).y; });
+                };
+            };
+
+            overlay.setMap(map);
+        }
+
+        // Handle node selection and deselection
+        function onNodeClick(event, nodeId) {
+            if (selectedNodes.has(nodeId)) {
+                selectedNodes.delete(nodeId);
+                event.target.style.fill = 'blue';
+            } else {
+                selectedNodes.add(nodeId);
+                event.target.style.fill = 'red';
+            }
+        }
+
+        // Confirm deletion of selected nodes
+        function confirmDeleteNodes() {
+            if (selectedNodes.size === 0) {
+                alert("No nodes selected for deletion.");
+                return;
+            }
+
+            const confirm = window.confirm(`Are you sure you want to delete ${selectedNodes.size} nodes?`);
+            if (confirm) {
+                fetch("/delete_nodes", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ nodes: Array.from(selectedNodes) }),
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json(); // Expect JSON response
+                })
+                .then(data => {
+                    console.log("Nodes deleted:", data.deleted_nodes);
+                    alert("Selected nodes deleted.");
+                    window.location.reload();
+                })
+                .catch(error => {
+                    console.error("Error:", error);
+                    alert("An error occurred while deleting the nodes. Please try again.");
+                });
+            }
+        }
+        */
+    </script>
+</head>
+<body onload="initMap()">
+    <h2>Select Neighborhood Boundaries</h2>
+    <p>Click on the map to select the four corners of the area (boundary box). The polygon will be drawn once you select 4 corners.</p>
+    <div id="map"></div>
+
+    <h3>Selected Corners:</h3>
+    <ul id="selected-corners">
+        <li id="corner-1">Corner 1: Not selected</li>
+        <li id="corner-2">Corner 2: Not selected</li>
+        <li id="corner-3">Corner 3: Not selected</li>
+        <li id="corner-4">Corner 4: Not selected</li>
+    </ul>
+
+    <button id="submit-btn" onclick="submitBoundaries()" disabled>Submit Boundaries</button>
+    <!-- Commented out delete button for now -->
+    <!-- <button id="delete-btn" onclick="confirmDeleteNodes()">Delete Selected Nodes</button> -->
+
+    <div id="loading-spinner"></div>
+</body>
+</html>
