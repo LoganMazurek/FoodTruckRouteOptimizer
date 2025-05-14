@@ -156,33 +156,34 @@ def result():
     
     return render_template("result.html", google_maps_urls=google_maps_urls)
 
-@app.route("/delete_nodes", methods=["POST"])
-def delete_nodes():
-    data = request.get_json()
-    nodes_to_delete = data.get("nodes", [])
 
-    # Retrieve the reference (boundary_id) from the session
-    boundary_id = session.get("boundary_id")
-    if not boundary_id:
-        logger.error("No boundary ID found in session")
-        return jsonify({"error": "No boundary ID found"}), 500
-
-    # Retrieve the graph from the temporary file
-    graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
-    if not os.path.exists(graph_file_path):
-        logger.error("No graph data found in temporary file")
-        return jsonify({"error": "No graph data found"}), 500
-    with open(graph_file_path, "rb") as graph_file:
-        graph = pickle.load(graph_file)
-
-    # Remove the selected nodes from the graph
-    graph.remove_nodes_from(nodes_to_delete)
-
-    # Save the updated graph to a file
-    with open(graph_file_path, "wb") as graph_file:
-        pickle.dump(graph, graph_file)
-
-    return jsonify({"deleted_nodes": nodes_to_delete})
+# @app.route("/delete_nodes", methods=["POST"])
+# def delete_nodes():
+#     data = request.get_json()
+#     nodes_to_delete = data.get("nodes", [])
+# 
+#     # Retrieve the reference (boundary_id) from the session
+#     boundary_id = session.get("boundary_id")
+#     if not boundary_id:
+#         logger.error("No boundary ID found in session")
+#         return jsonify({"error": "No boundary ID found"}), 500
+# 
+#     # Retrieve the graph from the temporary file
+#     graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
+#     if not os.path.exists(graph_file_path):
+#         logger.error("No graph data found in temporary file")
+#         return jsonify({"error": "No graph data found"}), 500
+#     with open(graph_file_path, "rb") as graph_file:
+#         graph = pickle.load(graph_file)
+# 
+#     # Remove the selected nodes from the graph
+#     graph.remove_nodes_from(nodes_to_delete)
+# 
+#     # Save the updated graph to a file
+#     with open(graph_file_path, "wb") as graph_file:
+#         pickle.dump(graph, graph_file)
+# 
+#     return jsonify({"deleted_nodes": nodes_to_delete})
 
 @app.route("/graph-data")
 def graph_data():

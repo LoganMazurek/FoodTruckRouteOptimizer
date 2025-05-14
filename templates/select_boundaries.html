@@ -158,9 +158,8 @@
                 .then(response => response.json())
                 .then(data => {
                     graphData = data;
-                    // overlayGraphOnMap(); // Commented out for now
-                    // Hide loading spinner
-                    document.getElementById("loading-spinner").style.display = "none";
+                    // Redirect to the result page
+                    window.location.href = "/result";
                 })
                 .catch(error => {
                     console.error("Error:", error);
@@ -285,3 +284,4 @@
     <div id="loading-spinner"></div>
 </body>
 </html>
+``` 
