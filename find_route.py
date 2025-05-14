@@ -174,6 +174,10 @@ def simplify_graph(nodes, ways):
                 j += 1
             i = j
 
+    # Retain only the largest connected component
+    largest_cc = max(nx.connected_components(simplified_graph), key=len)
+    simplified_graph = simplified_graph.subgraph(largest_cc).copy()
+
     return simplified_graph
 
 
