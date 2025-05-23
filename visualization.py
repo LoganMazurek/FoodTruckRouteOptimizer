@@ -49,58 +49,6 @@ def get_static_map_image(center_lat, center_lng, corners, api_key, zoom=15, size
         logger.error(f"Failed to get static map image: {response.status_code}")
         return None
 
-def show_graph_in_main_thread(G, title="graph", step=1, optimized_route=None):
-    pos = {
-        node: (
-            data['coordinates'][1],  # lng
-            data['coordinates'][0]   # lat
-        ) 
-        for node, data in G.nodes(data=True) if 'coordinates' in data
-    }
-    plt.figure()
-    nx.draw(G, pos, node_color='blue', with_labels=False, node_size=100, edge_color='gray')
-    if optimized_route:
-        route_edges = [(optimized_route[i], optimized_route[i + 1]) for i in range(len(optimized_route) - 1)]
-        nx.draw_networkx_edges(G, pos, edgelist=route_edges, edge_color='red', width=2)
-    plt.title(f"{title} - Step {step}")
-    plt.show()
-
-def on_click(event, pos):
-    global selected_nodes
-    for node, (x, y) in pos.items():
-        if abs(event.xdata - x) < 0.01 and abs(event.ydata - y) < 0.01:
-            if node in selected_nodes:
-                selected_nodes.remove(node)
-                print(f"Deselected node: {node}")
-            else:
-                selected_nodes.add(node)
-                print(f"Selected node: {node}")
-            break
-
-def visualize_graph(G, title="Graph View", cpp_route=None):
-    """
-    Visualize the graph with optional highlighted edges.
-    """
-    pos = {
-        node: (
-            data['coordinates'][1],  # lng
-            data['coordinates'][0]   # lat
-        ) 
-        for node, data in G.nodes(data=True) if 'coordinates' in data
-    }
-    fig, ax = plt.subplots()
-    nx.draw(G, pos, node_color='blue', with_labels=False, node_size=100, edge_color='gray', ax=ax)  # Increase node size for easier clicking
-
-    if cpp_route:
-        nx.draw_networkx_edges(G, pos, edgelist=cpp_route, edge_color='green', width=2)
-
-    fig.canvas.mpl_connect('button_press_event', lambda event: on_click(event, pos))
-    plt.title(title)
-    plt.show()
-
-def highlight_selected_nodes(G, pos, ax):
-    nx.draw_networkx_nodes(G, pos, nodelist=list(selected_nodes), node_color='red', node_size=100, ax=ax)
-
 def animate_cpp_route(G, route):
     """
     Animate the nearest neighbor route calculation.
@@ -142,18 +90,3 @@ def animate_cpp_route(G, route):
     ani = animation.FuncAnimation(fig, update, frames=len(route), repeat=False, interval=1000)
     
     plt.show()
-
-def confirm_delete_nodes(G):
-    global selected_nodes
-    if not selected_nodes:
-        print("No nodes selected for deletion.")
-        return G
-
-    confirm = input(f"Are you sure you want to delete {len(selected_nodes)} nodes? (yes/no): ")
-    if confirm.lower() == 'yes':
-        G.remove_nodes_from(selected_nodes)
-        selected_nodes.clear()
-        print("Selected nodes deleted.")
-    else:
-        print("Node deletion canceled.")
-    return G

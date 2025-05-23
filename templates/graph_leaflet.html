@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Graph Overlay on Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        #map { width: 100%; height: 600px; }
+    </style>
+</head>
+<body>
+    <h2>Street Graph Overlay</h2>
+    <div id="map"></div>
+    <button onclick="window.location.href='/result'">Optimize Route</button>
+    <button id="delete-btn" disabled>Delete Selected Nodes</button>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        // Pass boundary_id from Flask context
+        const boundaryId = "{{ boundary_id }}";
+
+        // Initialize the map (center and zoom will be set after loading data)
+        const map = L.map('map').setView([0, 0], 15);
+
+        // Add OpenStreetMap tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        let selectedNodeIds = [];
+
+        function onNodeClick(e, nodeId) {
+            const idx = selectedNodeIds.indexOf(nodeId);
+            if (idx === -1) {
+                selectedNodeIds.push(nodeId);
+                e.target.setStyle({fillColor: "#FFD700"}); // Highlight
+            } else {
+                selectedNodeIds.splice(idx, 1);
+                e.target.setStyle({fillColor: "#FF4136"}); // Un-highlight
+            }
+            document.getElementById('delete-btn').disabled = selectedNodeIds.length === 0;
+        }
+
+        // Fetch graph data and plot
+        fetch(`/graph-data?boundary_id=${boundaryId}`)
+            .then(response => response.json())
+            .then(data => {
+                // Center map on the first node
+                if (data.nodes.length > 0) {
+                    map.setView([data.nodes[0].lat, data.nodes[0].lon], 16);
+                }
+
+                // Draw links (edges)
+                data.links.forEach(link => {
+                    const source = data.nodes.find(n => n.id === link.source);
+                    const target = data.nodes.find(n => n.id === link.target);
+                    if (source && target) {
+                        L.polyline(
+                            [
+                                [source.lat, source.lon],
+                                [target.lat, target.lon]
+                            ],
+                            {color: '#0074D9', weight: 4, opacity: 0.7}
+                        ).addTo(map);
+                    }
+                });
+
+                // Draw nodes
+                data.nodes.forEach(node => {
+                    const marker = L.circleMarker([node.lat, node.lon], {
+                        radius: 6,
+                        fillColor: "#FF4136",
+                        color: "#fff",
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.9
+                    }).addTo(map);
+                    marker.on('click', (e) => onNodeClick(e, node.id));
+                });
+            });
+
+        document.getElementById('delete-btn').onclick = function() {
+            fetch('/delete_nodes', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({boundary_id: boundaryId, nodes: selectedNodeIds})
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    window.location.reload(); // Reload to show updated graph
+                } else {
+                    alert(data.error || "Could not delete nodes.");
+                }
+            });
+        };
+    </script>
+</body>
+</html>

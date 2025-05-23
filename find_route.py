@@ -6,11 +6,13 @@ import networkx as nx
 import logging
 from geopy.distance import geodesic
 
-from visualization import visualize_graph, selected_start_node
+from visualization import selected_start_node
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+MIN_STREET_LENGTH_METERS = 200
 
 def calculate_angle(p1, p2, p3):
     """
@@ -101,6 +103,16 @@ def simplify_graph(nodes, ways):
         highway = way.get("highway")
         if not way_id or highway in ["service", "footway", "track", "pedestrian"]:
             continue  # Skip non-drivable or irrelevant roads
+        
+        # Calculate total length of the way
+        total_length = 0
+        for i in range(1, len(node_list)):
+            coord1 = nodes[node_list[i-1]]
+            coord2 = nodes[node_list[i]]
+            total_length += geodesic(coord1, coord2).meters
+
+        if total_length < MIN_STREET_LENGTH_METERS:
+            continue  # Skip short streets
         
         for node_id in node_list:
             node_to_ways.setdefault(node_id, set()).add(way_id)
@@ -242,3 +254,32 @@ def clean_up_graph(G):
     isolated_nodes = list(nx.isolates(G))
     G.remove_nodes_from(isolated_nodes)
     return G
+
+def is_turn(p1, p2, p3, threshold_degrees=30):
+    """
+    Returns True if the angle at p2 (between p1->p2 and p2->p3) is less than the threshold (i.e., a turn).
+    """
+    def vector(a, b):
+        return (b[0] - a[0], b[1] - a[1])
+    v1 = vector(p2, p1)
+    v2 = vector(p2, p3)
+    dot = v1[0]*v2[0] + v1[1]*v2[1]
+    mag1 = math.hypot(*v1)
+    mag2 = math.hypot(*v2)
+    if mag1 == 0 or mag2 == 0:
+        return False
+    angle = math.acos(dot / (mag1 * mag2)) * 180 / math.pi
+    return angle > threshold_degrees
+
+def filter_turns(route, threshold_degrees=30):
+    """
+    Keeps only the start, end, and points where a turn occurs.
+    """
+    if len(route) <= 2:
+        return route
+    filtered = [route[0]]
+    for i in range(1, len(route)-1):
+        if is_turn(route[i-1], route[i], route[i+1], threshold_degrees):
+            filtered.append(route[i])
+    filtered.append(route[-1])
+    return filtered
