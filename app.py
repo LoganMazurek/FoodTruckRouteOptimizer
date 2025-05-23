@@ -200,7 +200,13 @@ def graph_data():
     if not boundary_id:
         return jsonify({"error": "No boundary ID provided"}), 400
 
-    graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
+    base_path = os.path.abspath("temp")
+    graph_file_path = os.path.abspath(os.path.join(base_path, f"{boundary_id}_graph.pkl"))
+
+    # Ensure the file path is within the intended directory
+    if not graph_file_path.startswith(base_path):
+        return jsonify({"error": "Invalid boundary ID"}), 400
+
     if not os.path.exists(graph_file_path):
         return jsonify({"error": "No graph data found"}), 404
 
