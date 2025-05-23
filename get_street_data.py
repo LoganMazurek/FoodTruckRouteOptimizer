@@ -32,7 +32,7 @@ def get_coordinates(zipcode):
     """
     Convert a ZIP code to lat/lng using Google Geocoding API
     """
-    geocode_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={zipcode}&key={API_KEY.API_KEY2}"
+    geocode_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={zipcode}&key={API_KEY.API_KEY}"
     
     try:
         response = requests.get(geocode_url, timeout=10)  # Setting a 10-second timeout

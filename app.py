@@ -9,7 +9,7 @@ import networkx as nx
 from build_urls import get_google_maps_url
 from find_route import clean_up_graph, find_route, simplify_graph
 from get_street_data import extract_nodes_and_ways, fetch_overpass_data, get_coordinates
-from visualization import animate_cpp_route, confirm_delete_nodes, show_graph_in_main_thread, visualize_graph
+from visualization import animate_cpp_route
 
 app = Flask(__name__)
 app.secret_key = 'z3ByRjbb-tN3VM4X71W2oITQupA='  # Replace with a secure secret key
@@ -38,7 +38,7 @@ def home():
         clat, clng = get_coordinates(zipcode)
         
         if clat and clng:
-            return render_template("select_boundaries.html", lat=clat, lng=clng, api_key=API_KEY.JS_MAPS_KEY)
+            return render_template("select_boundaries.html", lat=clat, lng=clng, api_key=API_KEY.API_KEY)
         else:
             logger.error("Failed to get coordinates for ZIP code")
             return "Failed to get coords for ZIP code", 500
@@ -89,13 +89,19 @@ def process_boundaries():
     with open(graph_file_path, "wb") as f:
         pickle.dump(graph, f)
 
-    # Return JSON instead of rendering a template
-    return jsonify({
-        "boundary_id": boundary_id,
-        "lat": center_lat,
-        "lng": center_lng,
-        "message": "Boundaries processed successfully."
-    })
+    return jsonify({"boundary_id": boundary_id})
+
+@app.route("/graph_leaflet")
+def graph_leaflet():
+    boundary_id = request.args.get("boundary_id")
+    return render_template("graph_leaflet.html", boundary_id=boundary_id)
+
+@app.route("/graph_display")
+def graph_display():
+    boundary_id = request.args.get("boundary_id")
+    if not boundary_id:
+        return jsonify({"error": "No boundary ID provided"}), 400
+    return render_template("graph_display.html", boundary_id=boundary_id)
 
 streets  = {
         "Lillian Court": [(41.6973526, -88.1879847),(41.6954405, -88.1877877)],
@@ -132,12 +138,6 @@ def result():
     with open(graph_file_path, "rb") as graph_file:
         graph = pickle.load(graph_file)
 
-    # Visualize the graph and allow node selection
-    show_graph_in_main_thread(graph, title="Select Nodes to Delete")
-
-    # Confirm deletion of selected nodes
-    graph = confirm_delete_nodes(graph)
-
     # Save the updated graph to a file
     with open(graph_file_path, "wb") as graph_file:
         pickle.dump(graph, graph_file)
@@ -146,44 +146,53 @@ def result():
     print("Optimizing route...")
     optimized_route = find_route(graph)
 
-    logger.debug(f"Optimized Route: {optimized_route}")
+    # Filter to only keep turns
+    from find_route import filter_turns
+    filtered_route = filter_turns(optimized_route, threshold_degrees=40)
 
-    if not isinstance(optimized_route, list) or not all(isinstance(coord, tuple) and len(coord) == 2 for coord in optimized_route):
-        logger.error("Optimized route is not in the expected format")
-        return "Optimized route is not in the expected format", 500
-
-    google_maps_urls = get_google_maps_url(optimized_route)
+    google_maps_urls = get_google_maps_url(filtered_route)
     
-    return render_template("result.html", google_maps_urls=google_maps_urls)
+    return render_template("result.html", google_maps_urls=google_maps_urls, boundary_id=boundary_id)
 
 
-# @app.route("/delete_nodes", methods=["POST"])
-# def delete_nodes():
-#     data = request.get_json()
-#     nodes_to_delete = data.get("nodes", [])
-# 
-#     # Retrieve the reference (boundary_id) from the session
-#     boundary_id = session.get("boundary_id")
-#     if not boundary_id:
-#         logger.error("No boundary ID found in session")
-#         return jsonify({"error": "No boundary ID found"}), 500
-# 
-#     # Retrieve the graph from the temporary file
-#     graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
-#     if not os.path.exists(graph_file_path):
-#         logger.error("No graph data found in temporary file")
-#         return jsonify({"error": "No graph data found"}), 500
-#     with open(graph_file_path, "rb") as graph_file:
-#         graph = pickle.load(graph_file)
-# 
-#     # Remove the selected nodes from the graph
-#     graph.remove_nodes_from(nodes_to_delete)
-# 
-#     # Save the updated graph to a file
-#     with open(graph_file_path, "wb") as graph_file:
-#         pickle.dump(graph, graph_file)
-# 
-#     return jsonify({"deleted_nodes": nodes_to_delete})
+@app.route("/delete_nodes", methods=["POST"])
+def delete_nodes():
+    data = request.get_json()
+    boundary_id = data.get("boundary_id")
+    nodes_to_delete = data.get("nodes", [])
+
+    if not boundary_id or not nodes_to_delete:
+        return jsonify({"success": False, "error": "Missing boundary_id or nodes"}), 400
+
+    graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
+    if not os.path.exists(graph_file_path):
+        return jsonify({"success": False, "error": "No graph data found"}), 404
+
+    with open(graph_file_path, "rb") as graph_file:
+        G = pickle.load(graph_file)
+
+    for node in nodes_to_delete:
+        if node not in G:
+            continue
+        neighbors = list(G.neighbors(node))
+        if len(neighbors) == 2:
+            # Add edge between the two neighbors if it doesn't already exist
+            if not G.has_edge(neighbors[0], neighbors[1]):
+                # Optionally, sum the weights/distances of the two edges being replaced
+                weight1 = G.edges[node, neighbors[0]].get('weight', 1)
+                weight2 = G.edges[node, neighbors[1]].get('weight', 1)
+                total_weight = weight1 + weight2
+                G.add_edge(neighbors[0], neighbors[1], weight=total_weight)
+        G.remove_node(node)
+
+    if not nx.is_connected(G):
+        return jsonify({"success": False, "error": "Deletion would disconnect the graph."}), 400
+
+    # Save updated graph
+    with open(graph_file_path, "wb") as graph_file:
+        pickle.dump(G, graph_file)
+
+    return jsonify({"success": True})
 
 @app.route("/graph-data")
 def graph_data():
