@@ -7,9 +7,8 @@ import pickle
 import networkx as nx
 
 from build_urls import get_google_maps_url
-from find_route import clean_up_graph, find_route, simplify_graph
+from find_route import clean_up_graph, find_route_cpp, simplify_graph, prune_common_sense_nodes
 from get_street_data import extract_nodes_and_ways, fetch_overpass_data, get_coordinates
-from visualization import animate_cpp_route
 
 app = Flask(__name__)
 app.secret_key = 'z3ByRjbb-tN3VM4X71W2oITQupA='  # Replace with a secure secret key
@@ -23,12 +22,6 @@ logger = logging.getLogger(__name__)
 clat = 0
 clng = 0
 
-# Test data for testing purposes
-test_street_data = {
-    "Street 1": [(41.8781, -87.6298), (41.8795, -87.6288), (41.8798, -87.6292)],
-    "Street 2": [(41.8785, -87.6305), (41.8798, -87.6292)],
-    "Street 3": [(41.8770, -87.6270), (41.8781, -87.6298)],
-}
 
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -96,64 +89,35 @@ def graph_leaflet():
     boundary_id = request.args.get("boundary_id")
     return render_template("graph_leaflet.html", boundary_id=boundary_id)
 
-@app.route("/graph_display")
-def graph_display():
-    boundary_id = request.args.get("boundary_id")
-    if not boundary_id:
-        return jsonify({"error": "No boundary ID provided"}), 400
-    return render_template("graph_display.html", boundary_id=boundary_id)
-
-streets  = {
-        "Lillian Court": [(41.6973526, -88.1879847),(41.6954405, -88.1877877)],
-        "Janet Court": [(41.7004725, -88.1904994),(41.700809, -88.1895047)],
-        "Andermann Drive": [(41.6979341, -88.1948626),(41.6977249, -88.191288)],
-        "Webster Lane": [(41.7020666, -88.192908),(41.7007769, -88.1927203),(41.6995153, -88.191803),(41.6982175, -88.1907354)],
-        "Schillinger Drive": [(41.6953958, -88.191604),(41.6967075, -88.1916367),(41.6977249, -88.191288),(41.6982175, -88.1907354),(41.6987062, -88.1892388),(41.6989425, -88.1876563),(41.6989922, -88.1861133)],
-        "Walter Lane": [(41.7020185, -88.1911324),(41.7004725, -88.1904994),(41.6987062, -88.1892388)],
-        "Whittington Lane": [(41.7020866, -88.1879406),(41.6989425, -88.1876563)],
-        "Mark Drive": [(41.6966454, -88.1948191),(41.6967075, -88.1916367)],
-        "McGrath Lane": [(41.7020596, -88.195023),(41.7006227, -88.194968),(41.6992083, -88.194917),(41.698538, -88.1948929),(41.6979341, -88.1948626),(41.6966454, -88.1948191),(41.6953537, -88.1947751)],
-        "Staffelot Drive": [(41.7006227, -88.194968),(41.7007769, -88.1927203)],
-        "Partlow Drive": [(41.6985285, -88.1957236),(41.698538, -88.1948929)],
-        "Hartman Drive": [(41.6992083, -88.194917),(41.6995153, -88.191803)],
-        "Wagner Road": [(41.7020596, -88.1950230),(41.7020666, -88.1929080),(41.7020185, -88.1911324),(41.7020866, -88.1879406),(41.7021875, -88.1862243)],
-        "Richards Drive": [(41.7011011, -88.1861828),(41.7011349, -88.1844148)],
-        "103rd Street": [(41.6953537, -88.1947751),(41.6953958, -88.1916040),(41.6954057, -88.1910493),(41.6954355, -88.1884590),(41.6954405, -88.1877877),(41.6954495, -88.1869937),(41.6954586, -88.1859774)],
-        "Book Road": [(41.6954586, -88.1859774),(41.6989922, -88.1861133),(41.7011011, -88.1861828),(41.7021875, -88.1862243)]
-    }
-
 @app.route("/result")
 def result():
-    # Retrieve the reference (boundary_id) from the session
-    boundary_id = session.get("boundary_id")
-    if not boundary_id:
-        logger.error("No boundary ID found in session")
-        return "No boundary ID found", 500
-
-    # Retrieve the graph from the temporary file
+    boundary_id = request.args.get("boundary_id") or session.get("boundary_id")
+    start_node = int(request.args.get("start_node"))
     graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
     if not os.path.exists(graph_file_path):
-        logger.error("No graph data found in temporary file")
-        return "No graph data found", 500
+        return "Graph not found", 404
     with open(graph_file_path, "rb") as graph_file:
+        import pickle
         graph = pickle.load(graph_file)
-
-    # Save the updated graph to a file
-    with open(graph_file_path, "wb") as graph_file:
-        pickle.dump(graph, graph_file)
-
-    # Find the optimized route using the updated graph
+    print("Graph node IDs:", list(graph.nodes))
     print("Optimizing route...")
-    optimized_route = find_route(graph)
-
-    # Filter to only keep turns
-    from find_route import filter_turns
-    filtered_route = filter_turns(optimized_route, threshold_degrees=40)
-
-    google_maps_urls = get_google_maps_url(filtered_route)
-    
+    # --- Use only the CPP route logic ---
+    optimized_route = find_route_cpp(graph, start_node)
+    def is_latlon_tuple(x):
+        return isinstance(x, (list, tuple)) and len(x) == 2 and all(isinstance(i, (float, int)) for i in x)
+    if not optimized_route or not is_latlon_tuple(optimized_route[0]):
+        return "No valid route found", 400
+    print(f"[DEBUG] Optimized route length: {len(optimized_route)}")
+    way_ids = []
+    for i in range(len(optimized_route)-1):
+        way_ids.append(None)  # No way_ids used
+    way_ids.append(way_ids[-1] if way_ids else None)  # Pad to match route length
+    pruned_route = prune_common_sense_nodes(optimized_route, way_ids=way_ids, angle_threshold=30, graph=graph)
+    print(f"[DEBUG] Pruned route length: {len(pruned_route)}")
+    if len(pruned_route) < 2:
+        return "Route too short after pruning", 400
+    google_maps_urls = get_google_maps_url(pruned_route)
     return render_template("result.html", google_maps_urls=google_maps_urls, boundary_id=boundary_id)
-
 
 @app.route("/delete_nodes", methods=["POST"])
 def delete_nodes():
@@ -211,6 +175,19 @@ def graph_data():
     links = [{"source": u, "target": v} for u, v in G.edges()]
 
     return jsonify({"nodes": nodes, "links": links})
+
+@app.route("/visualize_cpp")
+def visualize_cpp():
+    boundary_id = request.args.get("boundary_id")
+    start_node = int(request.args.get("start_node"))
+    graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
+    if not os.path.exists(graph_file_path):
+        return jsonify({"error": "Graph not found"}), 404
+    with open(graph_file_path, "rb") as graph_file:
+        import pickle
+        graph = pickle.load(graph_file)
+    route = find_route_cpp(graph, start_node)
+    return jsonify({"route": route})
 
 if __name__ == "__main__":
     app.run(debug=True)

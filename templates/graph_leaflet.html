@@ -4,16 +4,62 @@
     <meta charset="UTF-8">
     <title>Graph Overlay on Map</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <!-- Bootstrap CSS for modern UI -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <style>
         #map { width: 100%; height: 600px; }
+        .legend {
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+            font-size: 0.95em;
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 1000;
+        }
+        .spinner-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+            display: none;
+        }
     </style>
 </head>
-<body>
-    <h2>Street Graph Overlay</h2>
-    <div id="map"></div>
-    <button onclick="window.location.href='/result'">Optimize Route</button>
-    <button id="delete-btn" disabled>Delete Selected Nodes</button>
+<body class="bg-light">
+    <div class="container py-3">
+        <h2 class="mb-3">Street Graph Overlay</h2>
+        <div id="map" class="mb-3"></div>
+        <div class="mb-2">
+            <button id="set-start-btn" class="btn btn-success btn-sm me-1" disabled>Set as Start</button>
+            <button id="optimize-btn" class="btn btn-danger btn-sm me-1" disabled>Optimize Route</button>
+            <button id="view-directions-btn" class="btn btn-warning btn-sm me-1" style="display:none">View Directions</button>
+            <button id="delete-btn" class="btn btn-secondary btn-sm me-1" disabled>Delete Selected Nodes</button>
+        </div>
+        <!-- Legend -->
+        <div class="legend">
+            <b>Legend:</b><br>
+            <span style="color:#FF4136;">●</span> Node<br>
+            <span style="color:#FFD700;">●</span> Selected Node<br>
+            <span style="color:#2ECC40;">●</span> Start Node<br>
+            <span style="color:#0074D9;">●</span> End Node / Backtrack<br>
+            <span style="color:#d1001f; font-weight:bold;">━</span> Optimized Route<br>
+            <span style="color:#0074D9; font-weight:bold;">━</span> Doubled-back Segment
+        </div>
+        <!-- Spinner overlay -->
+        <div class="spinner-overlay" id="spinner-overlay">
+            <div class="spinner-border text-primary" role="status" style="width: 4rem; height: 4rem;">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    </div>
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         // Pass boundary_id from Flask context
         const boundaryId = "{{ boundary_id }}";
@@ -28,14 +74,20 @@
         }).addTo(map);
 
         let selectedNodeIds = [];
+        let selectedNodeId = null;
+        let startNodeId = null;
+        let nodeMarkers = {};
+        let routePolyline = null;
 
         function onNodeClick(e, nodeId) {
+            selectedNodeId = nodeId;
+            document.getElementById('set-start-btn').disabled = false;
+            Object.values(nodeMarkers).forEach(m => m.setStyle({fillColor: "#FF4136"}));
+            nodeMarkers[nodeId].setStyle({fillColor: "#FFD700"});
             const idx = selectedNodeIds.indexOf(nodeId);
             if (idx === -1) {
-                selectedNodeIds.push(nodeId);
                 e.target.setStyle({fillColor: "#FFD700"}); // Highlight
             } else {
-                selectedNodeIds.splice(idx, 1);
                 e.target.setStyle({fillColor: "#FF4136"}); // Un-highlight
             }
             document.getElementById('delete-btn').disabled = selectedNodeIds.length === 0;
@@ -44,16 +96,16 @@
         // Fetch graph data and plot
         fetch(`/graph-data?boundary_id=${boundaryId}`)
             .then(response => response.json())
-            .then(data => {
+            .then(function(data) {
                 // Center map on the first node
                 if (data.nodes.length > 0) {
                     map.setView([data.nodes[0].lat, data.nodes[0].lon], 16);
                 }
 
                 // Draw links (edges)
-                data.links.forEach(link => {
-                    const source = data.nodes.find(n => n.id === link.source);
-                    const target = data.nodes.find(n => n.id === link.target);
+                data.links.forEach(function(link) {
+                    const source = data.nodes.find(function(n) { return n.id === link.source; });
+                    const target = data.nodes.find(function(n) { return n.id === link.target; });
                     if (source && target) {
                         L.polyline(
                             [
@@ -66,7 +118,7 @@
                 });
 
                 // Draw nodes
-                data.nodes.forEach(node => {
+                data.nodes.forEach(function(node) {
                     const marker = L.circleMarker([node.lat, node.lon], {
                         radius: 6,
                         fillColor: "#FF4136",
@@ -75,7 +127,8 @@
                         opacity: 1,
                         fillOpacity: 0.9
                     }).addTo(map);
-                    marker.on('click', (e) => onNodeClick(e, node.id));
+                    marker.on('click', function(e) { onNodeClick(e, node.id); });
+                    nodeMarkers[node.id] = marker;
                 });
             });
 
@@ -93,6 +146,83 @@
                     alert(data.error || "Could not delete nodes.");
                 }
             });
+        };
+
+        document.getElementById('set-start-btn').onclick = function() {
+            startNodeId = selectedNodeId;
+            nodeMarkers[startNodeId].setStyle({fillColor: "#2ECC40"});
+            document.getElementById('set-start-btn').disabled = true;
+            checkReady();
+        };
+        function checkReady() {
+            document.getElementById('optimize-btn').disabled = !startNodeId;
+        }
+
+        // Show spinner during route optimization
+        function showSpinner() {
+            document.getElementById('spinner-overlay').style.display = 'flex';
+        }
+        function hideSpinner() {
+            document.getElementById('spinner-overlay').style.display = 'none';
+        }
+
+        document.getElementById('optimize-btn').onclick = function() {
+            if (!startNodeId) {
+                alert('Please select a start node first.');
+                return;
+            }
+            showSpinner();
+            fetch(`/visualize_cpp?boundary_id=${boundaryId}&start_node=${startNodeId}`)
+                .then(response => {
+                    hideSpinner();
+                    if (!response.ok) {
+                        alert('Failed to fetch route.');
+                        return Promise.reject();
+                    }
+                    return response.json();
+                })
+                .then(function(data) {
+                    if (!data || !data.route || data.route.length < 2) {
+                        alert('No route found.');
+                        return;
+                    }
+                    if (routePolyline) {
+                        map.removeLayer(routePolyline);
+                    }
+                    let route = data.route;
+                    let i = 1;
+                    let segmentCounts = {};
+                    function segmentKey(a, b) {
+                        return a[0] + ',' + a[1] + '|' + b[0] + ',' + b[1];
+                    }
+                    routePolyline = L.polyline([route[0]], {color: '#d1001f', weight: 10, opacity: 1.0}).addTo(map);
+                    map.fitBounds(L.polyline(route, {weight:1}).getBounds());
+                    function animateRoute() {
+                        if (i >= route.length) {
+                            document.getElementById('view-directions-btn').style.display = '';
+                            return;
+                        }
+                        let prev = route[i-1];
+                        let curr = route[i];
+                        let key = segmentKey(prev, curr);
+                        let revKey = segmentKey(curr, prev);
+                        segmentCounts[key] = (segmentCounts[key] || 0) + 1;
+                        segmentCounts[revKey] = segmentCounts[key];
+                        let color = segmentCounts[key] > 1 ? '#0074D9' : '#d1001f';
+                        L.polyline([prev, curr], {color: color, weight: 10, opacity: 1.0}).addTo(map);
+                        routePolyline.addLatLng(curr);
+                        i++;
+                        setTimeout(animateRoute, 350);
+                    }
+                    animateRoute();
+                })
+                .catch(err => {
+                    hideSpinner();
+                    if (err) console.error(err);
+                });
+        };
+        document.getElementById('view-directions-btn').onclick = function() {
+            window.location.href = `/result?boundary_id=${boundaryId}&start_node=${startNodeId}`;
         };
     </script>
 </body>
