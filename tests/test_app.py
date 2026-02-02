@@ -88,4 +88,7 @@ def test_result_with_street_data(client, mocker):
 
     response = client.get('/result?boundary_id=test_id')
     assert response.status_code == 200
-    assert b"http://maps.google.com" in response.data
+    from urllib.parse import urlparse
+    response_text = response.data.decode('utf-8')
+    parsed_url = urlparse(response_text)
+    assert parsed_url.hostname == "maps.google.com"
