@@ -12,6 +12,7 @@ from get_street_data import extract_nodes_and_ways, fetch_overpass_data, get_coo
 
 app = Flask(__name__)
 app.secret_key = 'z3ByRjbb-tN3VM4X71W2oITQupA='  # Replace with a secure secret key
+GRAPH_DIR = os.path.join(os.path.dirname(__file__), "temp")
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -163,8 +164,18 @@ def graph_data():
     boundary_id = request.args.get("boundary_id")
     if not boundary_id:
         return jsonify({"error": "No boundary ID provided"}), 400
+    # Validate boundary_id format (expect a UUID) to limit allowed characters
+    try:
+        uuid.UUID(boundary_id)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid boundary ID"}), 400
 
-    graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
+    filename = f"{boundary_id}_graph.pkl"
+    graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
+    # Ensure the resolved path is within the expected directory
+    if not graph_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+        return jsonify({"error": "Invalid graph path"}), 400
+
     if not os.path.exists(graph_file_path):
         return jsonify({"error": "No graph data found"}), 404
 
@@ -180,7 +191,20 @@ def graph_data():
 def visualize_cpp():
     boundary_id = request.args.get("boundary_id")
     start_node = int(request.args.get("start_node"))
-    graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
+    if not boundary_id:
+        return jsonify({"error": "No boundary ID provided"}), 400
+    # Validate boundary_id format (expect a UUID) to limit allowed characters
+    try:
+        uuid.UUID(boundary_id)
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid boundary ID"}), 400
+
+    filename = f"{boundary_id}_graph.pkl"
+    graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
+    # Ensure the resolved path is within the expected directory
+    if not graph_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+        return jsonify({"error": "Invalid graph path"}), 400
+
     if not os.path.exists(graph_file_path):
         return jsonify({"error": "Graph not found"}), 404
     with open(graph_file_path, "rb") as graph_file:
