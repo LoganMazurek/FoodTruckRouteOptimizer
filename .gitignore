@@ -4,6 +4,8 @@
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
 temp/*
+data/*
+!data/.gitkeep
 
 # User-specific files
 *.rsuser
@@ -403,3 +405,4 @@ FodyWeavers.xsd
 *.sln.iml
 
 API_KEY.py
+venv/*

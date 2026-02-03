@@ -14,7 +14,12 @@ from visualization import selected_start_node
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-MIN_STREET_LENGTH_METERS = 200
+# Coverage Optimization Settings:
+# - Reduced minimum street length from 200m to 50m to include smaller streets
+# - Now includes residential and service roads for comprehensive coverage
+# - Only excludes non-drivable paths (footways, tracks, pedestrian-only, cycleways)
+# This significantly improves route coverage in residential areas
+MIN_STREET_LENGTH_METERS = 50
 
 def calculate_angle(p1, p2, p3):
     """
@@ -104,23 +109,46 @@ def identify_intersections_and_end_nodes(nodes, ways):
         "merged_nodes": merged_nodes,
     }
 
-def simplify_graph(nodes, ways):
+def simplify_graph(nodes, ways, settings=None):
+    """
+    Build a simplified graph from OSM data with configurable coverage settings.
+    
+    Args:
+        nodes: Dictionary of node IDs to coordinates
+        ways: List of way dictionaries with nodes and metadata
+        settings: Optional dict with keys:
+            - coverage_mode: 'balanced', 'maximum', or 'major-roads'
+            - min_street_length: Minimum street length in meters (default 50)
+            - speed_priority: 'balanced', 'fastest', or 'thorough'
+    """
+    settings = settings or {}
+    coverage_mode = settings.get('coverage_mode', 'balanced')
+    min_length = settings.get('min_street_length', MIN_STREET_LENGTH_METERS)
+    speed_priority = settings.get('speed_priority', 'balanced')
+    
+    logger.debug(f"Building graph with settings: coverage={coverage_mode}, min_length={min_length}m, speed={speed_priority}")
+    
+    # Determine which road types to exclude based on coverage mode
+    if coverage_mode == 'maximum':
+        # Maximum coverage - only exclude truly non-drivable paths
+        excluded_types = ["footway", "path", "cycleway", "steps"]
+    elif coverage_mode == 'major-roads':
+        # Major roads only - exclude residential and service roads
+        excluded_types = ["footway", "track", "pedestrian", "path", "cycleway", "service", "residential", "unclassified"]
+    else:  # balanced
+        # Balanced - exclude only non-drivable
+        excluded_types = ["footway", "track", "pedestrian", "path", "cycleway"]
+    
     node_to_ways = {}
-
-    # Remove patterns for small streets/courts exclusion
-    # exclude_patterns = re.compile(r'\b(Court|Ct|Lane|Ln|Place|Pl|Way|Terrace|Ter|Circle|Cir|Alley|Aly)\b', re.IGNORECASE)
 
     for way in ways:
         way_id = way.get("name")
         node_list = way.get("nodes", [])
 
-        # Filter out unnamed, service, or non-drivable streets, but do NOT exclude courts/lanes/etc.
+        # Filter based on coverage mode
         highway = way.get("highway")
-        if (
-            not way_id or
-            highway in ["service", "footway", "track", "pedestrian"]
-        ):
-            continue  # Skip non-drivable or irrelevant roads
+        if not way_id or highway in excluded_types:
+            continue
         
         # Calculate total length of the way
         total_length = 0
@@ -129,8 +157,8 @@ def simplify_graph(nodes, ways):
             coord2 = nodes[node_list[i]]
             total_length += geodesic(coord1, coord2).meters
 
-        if total_length < MIN_STREET_LENGTH_METERS:
-            continue  # Skip short streets
+        if total_length < min_length:
+            continue  # Skip streets shorter than threshold
         
         for node_id in node_list:
             node_to_ways.setdefault(node_id, set()).add(way_id)
@@ -158,9 +186,9 @@ def simplify_graph(nodes, ways):
         way_id = way.get("name")
         node_list = way.get("nodes", [])
 
-        # Skip irrelevant streets that don't meet the criteria
+        # Apply same filtering for graph building
         highway = way.get("highway")
-        if not way_id or highway in ["service", "residential", "footway", "track", "pedestrian"]:
+        if not way_id or highway in excluded_types:
             continue
         
         i = 0
@@ -416,6 +444,106 @@ def filter_turns(route, threshold_degrees=70, way_ids=None, min_distance_meters=
     filtered.append(route[-1])
     return filtered
 
+def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_uturns=True):
+    """
+    Max-coverage variant with U-turn penalty at intersections (degree 3+).
+    Uses greedy edge selection with a penalty (not hard block) for U-turns.
+    This maintains coverage while gently preferring non-U-turn routes.
+    """
+    import time
+    G = graph.copy()
+    
+    intersections = {n for n in G.nodes if G.degree(n) >= 3}
+    
+    path = [start_node]
+    used_edges = set()
+    edge_usage_count = defaultdict(int)
+    current_node = start_node
+    prev = None
+    total_edges = set(frozenset(e) for e in G.edges)
+    MAX_EDGE_REUSE = 2
+    COVERAGE_THRESHOLD = 0.80
+    
+    start_time = time.time()
+    
+    # Greedy traversal with U-turn penalty
+    max_iterations = len(total_edges) * 3
+    iteration = 0
+    
+    while iteration < max_iterations:
+        iteration += 1
+        neighbors = list(G.neighbors(current_node))
+        if not neighbors:
+            break
+        
+        best_candidate = None
+        best_priority = (False, 999999, False, 999999)  # (is_forced_uturn, reuse, edge_len)
+        
+        for n in neighbors:
+            edge = frozenset([current_node, n])
+            if edge_usage_count[edge] >= MAX_EDGE_REUSE:
+                continue
+            
+            # Calculate metrics for this edge
+            edge_length = G[current_node][n].get("weight", 1)
+            is_unused = edge not in used_edges
+            reuse_count = edge_usage_count[edge]
+            
+            # Check if this is a U-turn
+            is_uturn = False
+            is_forced_uturn = False
+            if forbid_uturns and prev is not None:
+                prev_pt = G.nodes[prev]['coordinates']
+                curr_pt = G.nodes[current_node]['coordinates']
+                next_pt = G.nodes[n]['coordinates']
+                
+                b1 = bearing(prev_pt, curr_pt)
+                b2 = bearing(curr_pt, next_pt)
+                delta = (b2 - b1 + 540) % 360 - 180
+                turn_type = _turn_class(delta)
+                
+                if turn_type == "uturn":
+                    is_uturn = True
+                    if current_node in intersections:
+                        is_forced_uturn = True  # Penalize but don't forbid
+            
+            # Priority: prefer unused, then lower reuse, then prefer non-U-turns, then shorter edges
+            priority = (is_forced_uturn, reuse_count, not is_unused, edge_length)
+            
+            if best_candidate is None or priority < best_priority:
+                best_priority = priority
+                best_candidate = n
+        
+        if best_candidate is None:
+            # No more moves
+            break
+        
+        edge = frozenset([current_node, best_candidate])
+        path.append(best_candidate)
+        used_edges.add(edge)
+        edge_usage_count[edge] += 1
+        prev = current_node
+        current_node = best_candidate
+        
+        # Early exit if coverage good enough
+        coverage_pct = len(used_edges) / len(total_edges)
+        if coverage_pct >= COVERAGE_THRESHOLD and iteration > len(total_edges):
+            break
+    
+    elapsed = time.time() - start_time
+    coverage = len(used_edges) / len(total_edges)
+    print(f"[DEBUG] max_coverage_optimized: {coverage*100:.1f}% coverage ({len(used_edges)}/{len(total_edges)} edges)")
+    
+    coordinates_route = [(G.nodes[n]['coordinates'][0], G.nodes[n]['coordinates'][1]) for n in path]
+    return coordinates_route
+
+
+
+
+
+
+
+
 def find_route_max_coverage(graph, start_node, end_node=None, visualize=False):
     """
     Traverse the graph from start_node, covering as many unique edges as possible,
@@ -495,19 +623,22 @@ def find_route_max_coverage(graph, start_node, end_node=None, visualize=False):
         return coordinates_route, steps
     return coordinates_route
 
-def find_route_cpp(graph, start_node=None, max_edge_reuse=4, trim_loops=False):
+def find_route_cpp(graph, start_node=None, max_edge_reuse=2, trim_loops=False, strategy="drive"):
     """
-    Find a route that covers every edge at least once (Chinese Postman Problem / Eulerian path).
-    Always starts at start_node. End node is ignored.
-    Allows more edge reuse (default 4) and disables aggressive loop trimming for better edge coverage.
-    If the graph is not Eulerian, it will be eulerized (duplicate edges added as needed).
-    Returns the route as a list of coordinates (lat, lon).
+    Route finder with two strategies:
+    - "drive": heuristic that prefers efficient driving (right turns, no U-turns at intersections).
+    - "cpp": Eulerian route (Chinese Postman) for full coverage.
+    Returns list of coordinates (lat, lon).
     """
+    if strategy == "drive":
+        if start_node is None:
+            return []
+        return find_route_drive_preferential(graph, start_node, max_edge_reuse=max_edge_reuse)
+
+    # CPP/Eulerian for full coverage
     import networkx as nx
     G = graph.copy()
-    # Eulerize the graph if needed
     G_euler = nx.eulerize(G)
-    # Find Eulerian circuit or path
     node_path = None
     if start_node is not None:
         try:
@@ -521,7 +652,6 @@ def find_route_cpp(graph, start_node=None, max_edge_reuse=4, trim_loops=False):
         node_path = [path_edges[0][0]] + [v for u, v in path_edges]
     if not node_path:
         return []
-    # --- Allow more edge reuse, do not trim loops ---
     edge_counts = defaultdict(int)
     filtered_path = [node_path[0]]
     for i in range(1, len(node_path)):
@@ -532,7 +662,6 @@ def find_route_cpp(graph, start_node=None, max_edge_reuse=4, trim_loops=False):
             filtered_path.append(b)
         else:
             continue
-    # No aggressive loop trimming
     coordinates_route = [(G.nodes[n]['coordinates'][0], G.nodes[n]['coordinates'][1]) for n in filtered_path]
     return coordinates_route
 
@@ -557,6 +686,113 @@ def bearing(p1, p2):
     brng = math.atan2(x, y)
     brng = math.degrees(brng)
     return (brng + 360) % 360
+
+def _turn_delta_degrees(prev_pt, curr_pt, next_pt):
+    """
+    Return signed turn angle in degrees. Positive = right turn, negative = left.
+    Range (-180, 180].
+    """
+    if prev_pt is None:
+        return 0
+    b1 = bearing(prev_pt, curr_pt)
+    b2 = bearing(curr_pt, next_pt)
+    delta = (b2 - b1 + 540) % 360 - 180
+    return delta
+
+def _turn_class(delta_degrees, straight_thresh=20, uturn_thresh=160):
+    abs_delta = abs(delta_degrees)
+    if abs_delta <= straight_thresh:
+        return "straight"
+    if abs_delta >= uturn_thresh:
+        return "uturn"
+    return "right" if delta_degrees > 0 else "left"
+
+def find_route_drive_preferential(graph, start_node, max_edge_reuse=2, coverage_threshold=0.99):
+    """
+    Greedy route that prioritizes efficient driving:
+    - avoid U-turns at intersections (allowed at cul-de-sacs or if forced)
+    - prefer right turns over left turns
+    - avoid reusing edges when possible
+    - favors shorter edges
+    Returns route as list of coordinates (lat, lon).
+    """
+    G = graph.copy()
+    if start_node not in G:
+        return []
+
+    def is_culdesac(node_id):
+        return G.degree(node_id) == 1
+
+    total_edges = set(frozenset(e) for e in G.edges)
+    used_edges = defaultdict(int)
+    path = [start_node]
+    current = start_node
+    prev = None
+    max_steps = max(1, len(total_edges) * max_edge_reuse * 4)
+
+    def edge_length(u, v):
+        return G[u][v].get("weight", 1)
+
+    edge_lengths = [edge_length(u, v) for u, v in G.edges]
+    if edge_lengths:
+        edge_lengths_sorted = sorted(edge_lengths)
+        long_edge_threshold = edge_lengths_sorted[int(0.75 * (len(edge_lengths_sorted) - 1))]
+    else:
+        long_edge_threshold = 0
+
+    for _ in range(max_steps):
+        neighbors = list(G.neighbors(current))
+        if not neighbors:
+            break
+
+        unused_neighbors = [n for n in neighbors if used_edges[frozenset([current, n])] == 0]
+        candidate_neighbors = unused_neighbors if unused_neighbors else neighbors
+
+        candidates = []
+        for n in candidate_neighbors:
+            edge = frozenset([current, n])
+            if used_edges[edge] >= max_edge_reuse:
+                continue
+            prev_pt = G.nodes[prev]['coordinates'] if prev is not None else None
+            curr_pt = G.nodes[current]['coordinates']
+            next_pt = G.nodes[n]['coordinates']
+            delta = _turn_delta_degrees(prev_pt, curr_pt, next_pt)
+            turn_type = _turn_class(delta)
+
+            # Heavy penalty for U-turns, but don't skip them entirely
+            length_value = edge_length(current, n)
+            distance_penalty = length_value / 25.0
+            reuse_penalty = 120 * used_edges[edge]
+            if turn_type == "right":
+                turn_penalty = -5
+            elif turn_type == "left":
+                turn_penalty = 25
+            elif turn_type == "uturn":
+                turn_penalty = 500 if not is_culdesac(current) else 50
+            else:
+                turn_penalty = 5
+
+            # Prefer longer edges; penalize very short edges unless convenient
+            length_bonus = -min(40, length_value / 20.0) if length_value >= long_edge_threshold else 10
+
+            score = distance_penalty + reuse_penalty + turn_penalty + length_bonus
+            candidates.append((score, n, edge))
+
+        if not candidates:
+            break
+
+        candidates.sort(key=lambda x: x[0])
+        _, next_node, edge = candidates[0]
+        used_edges[edge] += 1
+        prev = current
+        current = next_node
+        path.append(current)
+
+    if path and path[-1] != start_node:
+        path.append(start_node)
+
+    coordinates_route = [(G.nodes[n]['coordinates'][0], G.nodes[n]['coordinates'][1]) for n in path]
+    return coordinates_route
 
 def prune_common_sense_nodes(route, way_ids=None, angle_threshold=30, graph=None):
     """

@@ -5,12 +5,136 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device_width, initial-scale=1.0">
     <title>Welcome to Food Truck Route Planner</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .container-center {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            padding: 50px;
+            max-width: 500px;
+            width: 100%;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+            font-weight: 700;
+        }
+        .form-control {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 12px 15px;
+            font-size: 1.1em;
+            transition: border-color 0.3s;
+        }
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            width: 100%;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-weight: 600;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+    </style>
 </head>
 <body>
-    <h1>Plan Your Food Truck Route: Enter a zipcode to pick boundaries</h1>
-    <form method="POST">
-        <input type="text" name="zipcode" placeholder="Enter Zipcode" required>
-        <button type="submit">Submit</button>
-    </form>
+    <div class="container-center">
+        <h1>🚚 Food Truck Route Planner</h1>
+        <p style="text-align: center; color: #666; margin-bottom: 30px;">Enter your zipcode to get started planning your optimal route</p>
+        <form method="POST">
+            <div class="mb-3">
+                <input type="text" name="zipcode" class="form-control" placeholder="Enter Zipcode (e.g., 60601)" required>
+            </div>
+            <button type="submit">Continue</button>
+        </form>
+    </div>
+
+    <!-- Footer with Credits -->
+    <footer style="background: white; border-top: 1px solid #ddd; padding: 20px; text-align: center; margin-top: 50px; font-size: 0.85em; color: #666;">
+        <p style="margin: 5px 0;">
+            <a href="#" onclick="showCredits(event)" style="color: #667eea; text-decoration: none; cursor: pointer;">Credits & Attribution</a>
+        </p>
+        <p style="margin: 5px 0; font-size: 0.8em;">© 2026 Food Truck Route Optimizer | Built with open-source technologies</p>
+    </footer>
+
+    <!-- Credits Modal -->
+    <div id="creditsModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 10px; padding: 30px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+            <h3 style="color: #333; margin-top: 0;">Credits & Attribution</h3>
+            <p style="color: #666; line-height: 1.6;">This project uses the following excellent open-source technologies and services:</p>
+            
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">🗺️ Mapping & Routing</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>Leaflet.js</strong> - Interactive maps library (BSD 2-Clause License)</li>
+                <li><strong>OpenStreetMap</strong> - Free map data and tiles (ODbL License)</li>
+                <li><strong>OSRM (Open Source Routing Machine)</strong> - Route optimization engine (AGPL-3.0 License)</li>
+                <li><strong>Google Maps API</strong> - Boundary selection interface</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">🎨 UI & Frontend</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>Bootstrap 5</strong> - CSS framework (MIT License)</li>
+                <li><strong>D3.js</strong> - Data visualization library (ISC License)</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">🐍 Backend</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>Flask</strong> - Web framework (BSD License)</li>
+                <li><strong>NetworkX</strong> - Graph library (BSD License)</li>
+                <li><strong>GeoPy</strong> - Geolocation library (MIT License)</li>
+                <li><strong>Overpass API</strong> - OpenStreetMap data queries</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">📊 Data</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>OpenStreetMap Contributors</strong> - Street data (ODbL License)</li>
+                <li><strong>Humanitarian Data Exchange</strong> - OSM.pbf data</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">🙏 Special Thanks</h5>
+            <p style="color: #666; margin: 10px 0; line-height: 1.8;">
+                This application is built on the work of countless open-source contributors. We are grateful for their dedication and innovation.
+            </p>
+
+            <button onclick="closeCredits()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; margin-top: 20px; font-weight: 600;">Close</button>
+        </div>
+    </div>
+
+    <script>
+        function showCredits(event) {
+            event.preventDefault();
+            document.getElementById('creditsModal').style.display = 'flex';
+        }
+        function closeCredits() {
+            document.getElementById('creditsModal').style.display = 'none';
+        }
+        // Close modal when clicking outside
+        document.getElementById('creditsModal').addEventListener('click', function(e) {
+            if (e.target === this) closeCredits();
+        });
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
