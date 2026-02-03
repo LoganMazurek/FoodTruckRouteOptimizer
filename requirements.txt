@@ -1,0 +1,8 @@
+Flask==2.3.0
+networkx==3.1
+matplotlib>=3.8.0
+geopy==2.3.0
+requests==2.31.0
+overpy==0.7
+pytest==7.3.1
+waitress==2.1.2
