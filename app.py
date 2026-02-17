@@ -11,7 +11,15 @@ from get_street_data import extract_nodes_and_ways, fetch_overpass_data, get_coo
 from osrm_client import get_route_with_waypoints
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY') or os.urandom(24)
+# Use environment variable for secret key
+# In production, SECRET_KEY must be set. For development/testing, a random key is generated.
+secret_key = os.environ.get('SECRET_KEY')
+if not secret_key:
+    # For development/testing only - will change on restart
+    import warnings
+    warnings.warn("SECRET_KEY environment variable not set. Using random key for development.")
+    secret_key = os.urandom(24)
+app.secret_key = secret_key
 GRAPH_DIR = os.path.join(os.path.dirname(__file__), "temp")
 
 # Configure logging
@@ -85,7 +93,11 @@ def process_boundaries():
     filename = f"{boundary_id}_graph.pkl"
     graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
-    if not graph_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+    try:
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), graph_file_path]) != os.path.abspath(GRAPH_DIR):
+            return jsonify({"error": "Invalid graph path"}), 400
+    except ValueError:
+        # Raised when paths are on different drives on Windows
         return jsonify({"error": "Invalid graph path"}), 400
     os.makedirs(GRAPH_DIR, exist_ok=True)
     with open(graph_file_path, "wb") as f:
@@ -113,7 +125,11 @@ def result():
     filename = f"{boundary_id}_graph.pkl"
     graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
-    if not graph_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+    try:
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), graph_file_path]) != os.path.abspath(GRAPH_DIR):
+            return "Invalid graph path", 400
+    except ValueError:
+        # Raised when paths are on different drives on Windows
         return "Invalid graph path", 400
     
     if not os.path.exists(graph_file_path):
@@ -214,7 +230,11 @@ def result():
     filename = f"{boundary_id}_route.pkl"
     route_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
-    if not route_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+    try:
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), route_file_path]) != os.path.abspath(GRAPH_DIR):
+            return "Invalid route path", 400
+    except ValueError:
+        # Raised when paths are on different drives on Windows
         return "Invalid route path", 400
     os.makedirs(GRAPH_DIR, exist_ok=True)
     with open(route_file_path, "wb") as f:
@@ -247,7 +267,11 @@ def delete_nodes():
     filename = f"{boundary_id}_graph.pkl"
     graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
-    if not graph_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+    try:
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), graph_file_path]) != os.path.abspath(GRAPH_DIR):
+            return jsonify({"success": False, "error": "Invalid graph path"}), 400
+    except ValueError:
+        # Raised when paths are on different drives on Windows
         return jsonify({"success": False, "error": "Invalid graph path"}), 400
 
     if not os.path.exists(graph_file_path):
@@ -297,7 +321,11 @@ def graph_data():
     filename = f"{boundary_id}_graph.pkl"
     graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
-    if not graph_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+    try:
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), graph_file_path]) != os.path.abspath(GRAPH_DIR):
+            return jsonify({"error": "Invalid graph path"}), 400
+    except ValueError:
+        # Raised when paths are on different drives on Windows
         return jsonify({"error": "Invalid graph path"}), 400
 
     if not os.path.exists(graph_file_path):
@@ -326,7 +354,11 @@ def visualize_cpp():
     filename = f"{boundary_id}_graph.pkl"
     graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
-    if not graph_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+    try:
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), graph_file_path]) != os.path.abspath(GRAPH_DIR):
+            return jsonify({"error": "Invalid graph path"}), 400
+    except ValueError:
+        # Raised when paths are on different drives on Windows
         return jsonify({"error": "Invalid graph path"}), 400
 
     if not os.path.exists(graph_file_path):
@@ -357,7 +389,11 @@ def export_gpx():
     filename = f"{boundary_id}_route.pkl"
     route_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
-    if not route_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+    try:
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), route_file_path]) != os.path.abspath(GRAPH_DIR):
+            return "Invalid route path", 400
+    except ValueError:
+        # Raised when paths are on different drives on Windows
         return "Invalid route path", 400
 
     if not os.path.exists(route_file_path):
