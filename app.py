@@ -163,15 +163,6 @@ def result():
     except Exception as e:
         print(f"[DEBUG] Error getting OSRM directions: {e}")
     
-    # Store route data in session for GPX export
-    import json
-    session['route_data'] = {
-        'geometry': route_geometry,
-        'waypoints': pruned_route,
-        'instructions': turn_by_turn_instructions,
-        'info': osrm_route_info
-    }
-    
     google_maps_urls = get_google_maps_url(pruned_route)
     return render_template("result.html", 
                          google_maps_urls=google_maps_urls,
