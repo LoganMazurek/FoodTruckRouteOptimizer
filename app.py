@@ -94,7 +94,7 @@ def process_boundaries():
     graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
     try:
-        if os.path.commonpath([os.path.abspath(GRAPH_DIR), graph_file_path]) != os.path.abspath(GRAPH_DIR):
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), os.path.abspath(graph_file_path)]) != os.path.abspath(GRAPH_DIR):
             return jsonify({"error": "Invalid graph path"}), 400
     except ValueError:
         # Raised when paths are on different drives on Windows
@@ -126,7 +126,7 @@ def result():
     graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
     try:
-        if os.path.commonpath([os.path.abspath(GRAPH_DIR), graph_file_path]) != os.path.abspath(GRAPH_DIR):
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), os.path.abspath(graph_file_path)]) != os.path.abspath(GRAPH_DIR):
             return "Invalid graph path", 400
     except ValueError:
         # Raised when paths are on different drives on Windows
@@ -231,7 +231,7 @@ def result():
     route_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
     try:
-        if os.path.commonpath([os.path.abspath(GRAPH_DIR), route_file_path]) != os.path.abspath(GRAPH_DIR):
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), os.path.abspath(route_file_path)]) != os.path.abspath(GRAPH_DIR):
             return "Invalid route path", 400
     except ValueError:
         # Raised when paths are on different drives on Windows
@@ -268,7 +268,7 @@ def delete_nodes():
     graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
     try:
-        if os.path.commonpath([os.path.abspath(GRAPH_DIR), graph_file_path]) != os.path.abspath(GRAPH_DIR):
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), os.path.abspath(graph_file_path)]) != os.path.abspath(GRAPH_DIR):
             return jsonify({"success": False, "error": "Invalid graph path"}), 400
     except ValueError:
         # Raised when paths are on different drives on Windows
@@ -322,7 +322,7 @@ def graph_data():
     graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
     try:
-        if os.path.commonpath([os.path.abspath(GRAPH_DIR), graph_file_path]) != os.path.abspath(GRAPH_DIR):
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), os.path.abspath(graph_file_path)]) != os.path.abspath(GRAPH_DIR):
             return jsonify({"error": "Invalid graph path"}), 400
     except ValueError:
         # Raised when paths are on different drives on Windows
@@ -355,7 +355,7 @@ def visualize_cpp():
     graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
     try:
-        if os.path.commonpath([os.path.abspath(GRAPH_DIR), graph_file_path]) != os.path.abspath(GRAPH_DIR):
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), os.path.abspath(graph_file_path)]) != os.path.abspath(GRAPH_DIR):
             return jsonify({"error": "Invalid graph path"}), 400
     except ValueError:
         # Raised when paths are on different drives on Windows
@@ -390,7 +390,7 @@ def export_gpx():
     route_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
     # Ensure the resolved path is within the expected directory
     try:
-        if os.path.commonpath([os.path.abspath(GRAPH_DIR), route_file_path]) != os.path.abspath(GRAPH_DIR):
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), os.path.abspath(route_file_path)]) != os.path.abspath(GRAPH_DIR):
             return "Invalid route path", 400
     except ValueError:
         # Raised when paths are on different drives on Windows
