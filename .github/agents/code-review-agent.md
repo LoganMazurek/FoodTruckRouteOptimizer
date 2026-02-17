@@ -156,8 +156,8 @@ if len(corners) != 4:
     return error
 
 # ✅ GOOD: Named constant
-REQUIRED_CORNERS = 4
-if len(corners) != REQUIRED_CORNERS:
+NUM_BOUNDARY_CORNERS = 4
+if len(corners) != NUM_BOUNDARY_CORNERS:
     return error
 ```
 

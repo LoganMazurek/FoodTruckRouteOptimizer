@@ -20,7 +20,7 @@ This is a web-based food truck route optimization tool that helps food trucks an
 
 1. **Code Style**: Follow PEP 8 conventions
    - Use 4 spaces for indentation
-   - Maximum line length of 100 characters
+   - Maximum line length of 100 characters (extended from PEP 8's 79 for better readability with modern displays)
    - Use snake_case for functions and variables
    - Use descriptive variable names
 
