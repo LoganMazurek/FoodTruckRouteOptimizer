@@ -7,8 +7,9 @@ import pickle
 import networkx as nx
 
 from build_urls import get_google_maps_url
-from find_route import clean_up_graph, find_route_cpp, simplify_graph, prune_common_sense_nodes
+from find_route import clean_up_graph, find_route_cpp, find_route_max_coverage_optimized, simplify_graph, prune_common_sense_nodes
 from get_street_data import extract_nodes_and_ways, fetch_overpass_data, get_coordinates
+from osrm_client import get_route_with_waypoints
 
 app = Flask(__name__)
 app.secret_key = 'z3ByRjbb-tN3VM4X71W2oITQupA='  # Replace with a secure secret key
@@ -42,12 +43,14 @@ def home():
 def process_boundaries():
     data = request.get_json()
     corners = data.get("corners")
+    settings = data.get("settings", {})
 
     if len(corners) != 4:
         logger.error("Invalid number of corners, expected 4")
         return jsonify({"error": "Please select exactly 4 corners."}), 400
 
     logger.debug(f"Processing boundaries with corners: {corners}")
+    logger.debug(f"Route settings: {settings}")
 
     latitudes = [corner['lat'] for corner in corners]
     longitudes = [corner['lng'] for corner in corners]
@@ -70,12 +73,13 @@ def process_boundaries():
 
     boundary_id = str(uuid.uuid4())
 
-    # Store the reference (boundary_id) in the session
+    # Store the reference (boundary_id) and settings in the session
     session['boundary_id'] = boundary_id
+    session[f'{boundary_id}_settings'] = settings
 
     nodes, ways = extract_nodes_and_ways(street_data)
 
-    graph = simplify_graph(nodes, ways)
+    graph = simplify_graph(nodes, ways, settings=settings)
     graph = clean_up_graph(graph)
 
     # Save the graph to a file using pickle
@@ -103,7 +107,7 @@ def result():
     print("Graph node IDs:", list(graph.nodes))
     print("Optimizing route...")
     # --- Use only the CPP route logic ---
-    optimized_route = find_route_cpp(graph, start_node)
+    optimized_route = find_route_max_coverage_optimized(graph, start_node)
     def is_latlon_tuple(x):
         return isinstance(x, (list, tuple)) and len(x) == 2 and all(isinstance(i, (float, int)) for i in x)
     if not optimized_route or not is_latlon_tuple(optimized_route[0]):
@@ -117,8 +121,62 @@ def result():
     print(f"[DEBUG] Pruned route length: {len(pruned_route)}")
     if len(pruned_route) < 2:
         return "Route too short after pruning", 400
+    
+    # Get turn-by-turn directions from OSRM
+    turn_by_turn_instructions = None
+    osrm_route_info = None
+    route_geometry = None
+    try:
+        osrm_result = get_route_with_waypoints(pruned_route, overview="full")
+        if osrm_result:
+            # Extract turn-by-turn instructions
+            turn_by_turn_instructions = []
+            total_distance_km = osrm_result['distance'] / 1000
+            total_duration_min = osrm_result['duration'] / 60
+            
+            for leg in osrm_result.get('legs', []):
+                for step in leg.get('steps', []):
+                    instruction = {
+                        'distance': step.get('distance', 0),
+                        'duration': step.get('duration', 0),
+                        'instruction': step.get('maneuver', {}).get('instruction', 'Continue'),
+                        'name': step.get('name', 'unnamed road')
+                    }
+                    turn_by_turn_instructions.append(instruction)
+            
+            # Extract the route geometry (complete path with all coordinates)
+            if 'geometry' in osrm_result and 'coordinates' in osrm_result['geometry']:
+                # OSRM returns [lon, lat], we need [lat, lon] for Leaflet
+                route_geometry = [[coord[1], coord[0]] for coord in osrm_result['geometry']['coordinates']]
+            
+            osrm_route_info = {
+                'total_distance_km': round(total_distance_km, 2),
+                'total_duration_min': round(total_duration_min, 2)
+            }
+            print(f"[DEBUG] OSRM turn-by-turn instructions: {len(turn_by_turn_instructions)} steps")
+            print(f"[DEBUG] Route geometry points: {len(route_geometry) if route_geometry else 0}")
+        else:
+            print("[DEBUG] OSRM route failed, proceeding without turn-by-turn")
+    except Exception as e:
+        print(f"[DEBUG] Error getting OSRM directions: {e}")
+    
+    # Store route data in session for GPX export
+    import json
+    session['route_data'] = {
+        'geometry': route_geometry,
+        'waypoints': pruned_route,
+        'instructions': turn_by_turn_instructions,
+        'info': osrm_route_info
+    }
+    
     google_maps_urls = get_google_maps_url(pruned_route)
-    return render_template("result.html", google_maps_urls=google_maps_urls, boundary_id=boundary_id)
+    return render_template("result.html", 
+                         google_maps_urls=google_maps_urls,
+                         boundary_id=boundary_id,
+                         turn_by_turn=turn_by_turn_instructions,
+                         route_info=osrm_route_info,
+                         route_geometry=route_geometry,
+                         pruned_route=pruned_route)
 
 @app.route("/delete_nodes", methods=["POST"])
 def delete_nodes():
@@ -150,8 +208,12 @@ def delete_nodes():
                 G.add_edge(neighbors[0], neighbors[1], weight=total_weight)
         G.remove_node(node)
 
-    if not nx.is_connected(G):
-        return jsonify({"success": False, "error": "Deletion would disconnect the graph."}), 400
+    if G.number_of_nodes() > 0 and not nx.is_connected(G):
+        components = list(nx.connected_components(G))
+        if components:
+            largest_component = max(components, key=len)
+            nodes_to_remove = set(G.nodes()) - set(largest_component)
+            G.remove_nodes_from(nodes_to_remove)
 
     # Save updated graph
     with open(graph_file_path, "wb") as graph_file:
@@ -213,5 +275,70 @@ def visualize_cpp():
     route = find_route_cpp(graph, start_node)
     return jsonify({"route": route})
 
+@app.route("/export_gpx")
+def export_gpx():
+    """Export the current route as a GPX file for navigation apps"""
+    from flask import Response
+    from datetime import datetime
+    
+    route_data = session.get('route_data')
+    if not route_data:
+        return "No route data available", 404
+    
+    # Generate GPX XML
+    gpx_content = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    gpx_content += '<gpx version="1.1" creator="FoodTruckRouteOptimizer" xmlns="http://www.topografix.com/GPX/1/1">\n'
+    gpx_content += f'  <metadata>\n'
+    gpx_content += f'    <name>Food Truck Route</name>\n'
+    gpx_content += f'    <desc>Optimized route generated using Chinese Postman Problem algorithm</desc>\n'
+    gpx_content += f'    <time>{datetime.utcnow().isoformat()}Z</time>\n'
+    gpx_content += f'  </metadata>\n'
+    
+    # Add waypoints
+    waypoints = route_data.get('waypoints', [])
+    for i, (lat, lon) in enumerate(waypoints):
+        name = 'Start' if i == 0 else ('End' if i == len(waypoints) - 1 else f'Waypoint {i}')
+        gpx_content += f'  <wpt lat="{lat}" lon="{lon}">\n'
+        gpx_content += f'    <name>{name}</name>\n'
+        gpx_content += f'  </wpt>\n'
+    
+    # Add route track (full geometry from OSRM)
+    geometry = route_data.get('geometry')
+    if geometry:
+        gpx_content += '  <trk>\n'
+        gpx_content += '    <name>Food Truck Route</name>\n'
+        gpx_content += '    <trkseg>\n'
+        for lat, lon in geometry:
+            gpx_content += f'      <trkpt lat="{lat}" lon="{lon}"></trkpt>\n'
+        gpx_content += '    </trkseg>\n'
+        gpx_content += '  </trk>\n'
+    
+    # Add route with turn-by-turn instructions as route points
+    instructions = route_data.get('instructions', [])
+    if instructions and waypoints:
+        gpx_content += '  <rte>\n'
+        gpx_content += '    <name>Turn-by-Turn Route</name>\n'
+        for i, (lat, lon) in enumerate(waypoints):
+            gpx_content += f'    <rtept lat="{lat}" lon="{lon}">\n'
+            if i < len(instructions):
+                inst = instructions[i]
+                gpx_content += f'      <name>{inst.get("instruction", "Continue")}</name>\n'
+                if inst.get('name'):
+                    gpx_content += f'      <desc>onto {inst["name"]}</desc>\n'
+            gpx_content += f'    </rtept>\n'
+        gpx_content += '  </rte>\n'
+    
+    gpx_content += '</gpx>'
+    
+    # Return as downloadable file
+    return Response(
+        gpx_content,
+        mimetype='application/gpx+xml',
+        headers={
+            'Content-Disposition': 'attachment; filename="food_truck_route.gpx"',
+            'Content-Type': 'application/gpx+xml; charset=utf-8'
+        }
+    )
+
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=False, host='0.0.0.0', port=5001)

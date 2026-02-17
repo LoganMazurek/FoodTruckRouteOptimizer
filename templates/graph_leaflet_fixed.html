@@ -222,10 +222,6 @@
                             <span>Start Node</span>
                         </div>
                         <div class="legend-item">
-                            <div class="legend-dot" style="background-color: #0074D9;"></div>
-                            <span>End Node / Backtrack</span>
-                        </div>
-                        <div class="legend-item">
                             <div class="legend-line">
                                 <div style="height: 3px; width: 20px; background-color: #d1001f; font-weight: bold;"></div>
                             </div>
@@ -246,10 +242,10 @@
                     </div>
                     <div class="card-body" style="font-size: 0.9em;">
                         <ul style="margin: 0; padding-left: 18px;">
-                            <li>Click nodes on the map to select/deselect them</li>
-                            <li>The optimization calculates the shortest Eulerian path</li>
+                            <li>Click nodes on the map to select/deselect them - remove any unwanted nodes like small dead-end streets, busy roads</li>
+                            <li>Check for duplicate nodes on bigger streets (2+ lanes)</li>
+                            <li>The optimization calculates a 'goldilocks' path of medium coverage and speed</li>
                             <li>Blue lines show streets you'll traverse twice</li>
-                            <li>Route planning uses real street data</li>
                         </ul>
                     </div>
                 </div>
