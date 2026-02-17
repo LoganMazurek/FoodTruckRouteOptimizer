@@ -1,7 +1,6 @@
 import logging
 import uuid
 from flask import Flask, jsonify, render_template, request, session
-import API_KEY
 import os
 import pickle
 import networkx as nx
@@ -33,7 +32,11 @@ def home():
         clat, clng = get_coordinates(zipcode)
         
         if clat and clng:
-            return render_template("select_boundaries.html", lat=clat, lng=clng, api_key=API_KEY.API_KEY)
+            api_key = os.getenv('GOOGLE_MAPS_API_KEY')
+            if not api_key:
+                logger.error("GOOGLE_MAPS_API_KEY environment variable not set")
+                return "API key not configured", 500
+            return render_template("select_boundaries.html", lat=clat, lng=clng, api_key=api_key)
         else:
             logger.error("Failed to get coordinates for ZIP code")
             return "Failed to get coords for ZIP code", 500

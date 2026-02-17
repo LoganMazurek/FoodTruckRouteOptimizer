@@ -1,5 +1,5 @@
 import requests
-import API_KEY
+import os
 import logging
 import overpy
 import time
@@ -32,7 +32,10 @@ def get_coordinates(zipcode):
     """
     Convert a ZIP code to lat/lng using Google Geocoding API
     """
-    geocode_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={zipcode}&key={API_KEY.API_KEY}"
+    api_key = os.getenv('GOOGLE_MAPS_API_KEY')
+    if not api_key:
+        raise ValueError("GOOGLE_MAPS_API_KEY environment variable not set")
+    geocode_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={zipcode}&key={api_key}"
     
     try:
         response = requests.get(geocode_url, timeout=10)  # Setting a 10-second timeout
