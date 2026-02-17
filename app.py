@@ -314,9 +314,20 @@ def export_gpx():
     boundary_id = request.args.get("boundary_id")
     if not boundary_id:
         return "Missing boundary_id parameter", 400
+
+    # Validate boundary_id format (expect a UUID) to limit allowed characters
+    try:
+        uuid.UUID(boundary_id)
+    except (ValueError, TypeError):
+        return "Invalid boundary_id parameter", 400
     
-    # Load route data from file instead of session
-    route_file_path = os.path.join("temp", f"{boundary_id}_route.pkl")
+    # Load route data from file instead of session, using a safe, normalized path
+    filename = f"{boundary_id}_route.pkl"
+    route_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
+    # Ensure the resolved path is within the expected directory
+    if not route_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+        return "Invalid route path", 400
+
     if not os.path.exists(route_file_path):
         return "No route data available", 404
     
