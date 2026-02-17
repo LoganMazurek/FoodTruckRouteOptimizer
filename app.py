@@ -76,10 +76,6 @@ def process_boundaries():
 
     boundary_id = str(uuid.uuid4())
 
-    # Store the reference (boundary_id) and settings in the session
-    session['boundary_id'] = boundary_id
-    session[f'{boundary_id}_settings'] = settings
-
     nodes, ways = extract_nodes_and_ways(street_data)
 
     graph = simplify_graph(nodes, ways, settings=settings)
@@ -99,7 +95,9 @@ def graph_leaflet():
 
 @app.route("/result")
 def result():
-    boundary_id = request.args.get("boundary_id") or session.get("boundary_id")
+    boundary_id = request.args.get("boundary_id")
+    if not boundary_id:
+        return "Missing boundary_id parameter", 400
     start_node = int(request.args.get("start_node"))
     graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
     if not os.path.exists(graph_file_path):
@@ -122,46 +120,84 @@ def result():
     way_ids.append(way_ids[-1] if way_ids else None)  # Pad to match route length
     pruned_route = prune_common_sense_nodes(optimized_route, way_ids=way_ids, angle_threshold=30, graph=graph)
     print(f"[DEBUG] Pruned route length: {len(pruned_route)}")
+    logger.debug(f"[DEBUG] First 3 waypoints in pruned_route: {pruned_route[:3]}")
+    logger.debug(f"[DEBUG] Last 3 waypoints in pruned_route: {pruned_route[-3:]}")
+    
+    # Validate waypoint coordinates
+    min_lat = min(pt[0] for pt in pruned_route)
+    max_lat = max(pt[0] for pt in pruned_route)
+    min_lon = min(pt[1] for pt in pruned_route)
+    max_lon = max(pt[1] for pt in pruned_route)
+    logger.debug(f"[DEBUG] Route bounds - Lat: {min_lat:.4f} to {max_lat:.4f}, Lon: {min_lon:.4f} to {max_lon:.4f}")
+    
     if len(pruned_route) < 2:
         return "Route too short after pruning", 400
     
-    # Get turn-by-turn directions from OSRM
-    turn_by_turn_instructions = None
-    osrm_route_info = None
-    route_geometry = None
-    try:
-        osrm_result = get_route_with_waypoints(pruned_route, overview="full")
-        if osrm_result:
-            # Extract turn-by-turn instructions
-            turn_by_turn_instructions = []
-            total_distance_km = osrm_result['distance'] / 1000
-            total_duration_min = osrm_result['duration'] / 60
+    # For visualization: use the actual route path directly (no OSRM waypoint routing)
+    # This avoids the huge loops from OSRM connecting duplicate waypoints
+    route_geometry = pruned_route  # Direct path through graph edges for map display
+    
+    # For navigation: DON'T use OSRM - it creates massive loops from coordinate snapping issues
+    # Instead, use graph edges directly since we already have exact street connections
+    logger.debug(f"[NAV] Creating navigation from graph edges for {len(pruned_route)} waypoints")
+    
+    turn_by_turn_instructions = []
+    total_distance_m = 0
+    
+    # Calculate distance and create basic navigation from graph edges
+    for i in range(len(optimized_route) - 1):
+        curr_coord = optimized_route[i]
+        next_coord = optimized_route[i + 1]
+        
+        # Find the graph edge
+        curr_node = None
+        next_node = None
+        for node, data in graph.nodes(data=True):
+            if data.get('coordinates') == curr_coord:
+                curr_node = node
+            if data.get('coordinates') == next_coord:
+                next_node = node
+        
+        if curr_node and next_node and graph.has_edge(curr_node, next_node):
+            edge_data = graph[curr_node][next_node]
+            distance = edge_data.get('distance', 0)
+            street_name = edge_data.get('way_id', 'unnamed road')
+            total_distance_m += distance
             
-            for leg in osrm_result.get('legs', []):
-                for step in leg.get('steps', []):
-                    instruction = {
-                        'distance': step.get('distance', 0),
-                        'duration': step.get('duration', 0),
-                        'instruction': step.get('maneuver', {}).get('instruction', 'Continue'),
-                        'name': step.get('name', 'unnamed road')
-                    }
-                    turn_by_turn_instructions.append(instruction)
-            
-            # Extract the route geometry (complete path with all coordinates)
-            if 'geometry' in osrm_result and 'coordinates' in osrm_result['geometry']:
-                # OSRM returns [lon, lat], we need [lat, lon] for Leaflet
-                route_geometry = [[coord[1], coord[0]] for coord in osrm_result['geometry']['coordinates']]
-            
-            osrm_route_info = {
-                'total_distance_km': round(total_distance_km, 2),
-                'total_duration_min': round(total_duration_min, 2)
-            }
-            print(f"[DEBUG] OSRM turn-by-turn instructions: {len(turn_by_turn_instructions)} steps")
-            print(f"[DEBUG] Route geometry points: {len(route_geometry) if route_geometry else 0}")
-        else:
-            print("[DEBUG] OSRM route failed, proceeding without turn-by-turn")
-    except Exception as e:
-        print(f"[DEBUG] Error getting OSRM directions: {e}")
+            # Create simple instruction
+            turn_by_turn_instructions.append({
+                'distance': distance,
+                'duration': distance / 8.33,  # ~30 km/h = 8.33 m/s
+                'instruction': f'Continue on {street_name}',
+                'name': street_name
+            })
+    
+    osrm_route_info = {
+        'total_distance_km': round(total_distance_m / 1000, 2),
+        'total_duration_min': round((total_distance_m / 1000) / 30 * 60, 2)
+    }
+    
+    osrm_geometry = pruned_route  # Use waypoints directly for GPX track
+    
+    # Convert km to miles
+    osrm_route_info['total_distance_miles'] = round(osrm_route_info['total_distance_km'] * 0.621371, 2)
+    
+    print(f"[DEBUG] Map display: {len(route_geometry)} waypoint markers")
+    print(f"[DEBUG] Navigation: {len(turn_by_turn_instructions) if turn_by_turn_instructions else 0} instructions")
+    print(f"[DEBUG] Route distance: {osrm_route_info['total_distance_miles']} miles ({osrm_route_info['total_distance_km']} km)")
+    
+    # Store route data in file for GPX export (avoid session size limits)
+    route_data = {
+        'waypoints': pruned_route,
+        'geometry': osrm_geometry if osrm_geometry else route_geometry,  # Detailed OSRM geometry for GPX navigation
+        'instructions': turn_by_turn_instructions,
+        'distance_km': osrm_route_info['total_distance_km'],
+        'distance_miles': osrm_route_info['total_distance_miles'],
+        'duration_min': osrm_route_info['total_duration_min']
+    }
+    route_file_path = os.path.join("temp", f"{boundary_id}_route.pkl")
+    with open(route_file_path, "wb") as f:
+        pickle.dump(route_data, f)
     
     google_maps_urls = get_google_maps_url(pruned_route)
     return render_template("result.html", 
@@ -275,16 +311,27 @@ def export_gpx():
     from flask import Response
     from datetime import datetime
     
-    route_data = session.get('route_data')
-    if not route_data:
+    boundary_id = request.args.get("boundary_id")
+    if not boundary_id:
+        return "Missing boundary_id parameter", 400
+    
+    # Load route data from file instead of session
+    route_file_path = os.path.join("temp", f"{boundary_id}_route.pkl")
+    if not os.path.exists(route_file_path):
         return "No route data available", 404
     
+    with open(route_file_path, "rb") as f:
+        route_data = pickle.load(f)
+    
     # Generate GPX XML
+    distance_miles = route_data.get('distance_miles', 0)
+    duration_min = route_data.get('duration_min', 0)
+    
     gpx_content = '<?xml version="1.0" encoding="UTF-8"?>\n'
     gpx_content += '<gpx version="1.1" creator="FoodTruckRouteOptimizer" xmlns="http://www.topografix.com/GPX/1/1">\n'
     gpx_content += f'  <metadata>\n'
-    gpx_content += f'    <name>Food Truck Route</name>\n'
-    gpx_content += f'    <desc>Optimized route generated using Chinese Postman Problem algorithm</desc>\n'
+    gpx_content += f'    <name>Food Truck Coverage Route</name>\n'
+    gpx_content += f'    <desc>Route: {distance_miles} miles, {duration_min:.0f} min. Optimized for maximum street coverage.</desc>\n'
     gpx_content += f'    <time>{datetime.utcnow().isoformat()}Z</time>\n'
     gpx_content += f'  </metadata>\n'
     

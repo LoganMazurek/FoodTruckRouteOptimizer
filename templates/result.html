@@ -250,7 +250,7 @@
         <div class="route-info">
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                 <div>
-                    <p>📏 <strong>Total Distance:</strong> {{ route_info.total_distance_km }} km</p>
+                    <p>📏 <strong>Total Distance:</strong> {{ route_info.total_distance_miles }} miles</p>
                 </div>
                 <div>
                     <p>⏱️ <strong>Estimated Duration:</strong> {{ route_info.total_duration_min }} minutes</p>
@@ -285,20 +285,32 @@
                 opacity: 0.8
             }).addTo(map);
             
-            // Add markers for waypoints
+            // Add markers for waypoints - only mark start, others are small dots
+            // For edge-coverage routes, nodes may be revisited so sequential numbering doesn't make sense
             waypoints.forEach((point, index) => {
-                const markerColor = index === 0 ? '#28a745' : (index === waypoints.length - 1 ? '#dc3545' : '#667eea');
-                const markerLabel = index === 0 ? 'S' : (index === waypoints.length - 1 ? 'E' : index);
-                const markerIcon = L.divIcon({
-                    className: 'custom-marker',
-                    html: `<div style="background-color: ${markerColor}; color: white; width: 28px; height: 28px; border-radius: 50%; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.9em; box-shadow: 0 2px 5px rgba(0,0,0,0.2);">${markerLabel}</div>`,
-                    iconSize: [28, 28],
-                    iconAnchor: [14, 14]
-                });
-                
-                L.marker([point[0], point[1]], { icon: markerIcon })
-                    .bindPopup(index === 0 ? '<strong>Start</strong>' : (index === waypoints.length - 1 ? '<strong>End</strong>' : `<strong>Stop ${index}</strong>`))
-                    .addTo(map);
+                if (index === 0) {
+                    // Start marker - large green with 'S'
+                    const startIcon = L.divIcon({
+                        className: 'custom-marker',
+                        html: `<div style="background-color: #28a745; color: white; width: 32px; height: 32px; border-radius: 50%; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.1em; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">S</div>`,
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16]
+                    });
+                    L.marker([point[0], point[1]], { icon: startIcon })
+                        .bindPopup('<strong>Start Point</strong>')
+                        .addTo(map);
+                } else {
+                    // All other waypoints - small purple dots (no numbers for coverage routes)
+                    const waypointIcon = L.divIcon({
+                        className: 'custom-marker',
+                        html: `<div style="background-color: #667eea; width: 8px; height: 8px; border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></div>`,
+                        iconSize: [8, 8],
+                        iconAnchor: [4, 4]
+                    });
+                    L.marker([point[0], point[1]], { icon: waypointIcon })
+                        .bindPopup(`<strong>Route Point ${index}</strong>`)
+                        .addTo(map);
+                }
             });
             
             // Fit the map to show the entire route
@@ -329,7 +341,7 @@
                             {% endif %}
                         </div>
                         <div class="step-details">
-                            <span>📏 {{ (step.distance / 1000) | round(2) }} km</span>
+                            <span>📏 {{ (step.distance / 1609.34) | round(2) }} mi</span>
                             <span>⏱️ {{ (step.duration / 60) | round(1) }} min</span>
                         </div>
                     </div>
@@ -359,7 +371,7 @@
 
         <div class="button-container">
             {% if route_geometry %}
-            <a href="/export_gpx" class="btn btn-primary">
+            <a href="/export_gpx?boundary_id={{ boundary_id }}" class="btn btn-primary">
                 📱 Download GPX for Navigation App
             </a>
             {% endif %}

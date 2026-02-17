@@ -24,7 +24,8 @@ def extract_nodes_and_ways(street_data):
         street_name = way.tags.get("name")
         if street_name:
             node_refs = [n.id for n in way.nodes]  # Get node ids for the street
-            ways.append({"name": street_name, "nodes": node_refs})
+            highway_type = way.tags.get("highway", "unclassified")  # Extract highway type for filtering
+            ways.append({"name": street_name, "nodes": node_refs, "highway": highway_type})
 
     return nodes, ways
 
@@ -41,10 +42,10 @@ def get_coordinates(zipcode):
         response = requests.get(geocode_url, timeout=10)  # Setting a 10-second timeout
         response.raise_for_status()  # Raise an exception for 4xx/5xx responses
     except requests.exceptions.Timeout:
-        print("Request timed out.")
+        logger.error("Request timed out.")
         return None, None
     except requests.exceptions.RequestException as e:
-        print(f"Request failed: {e}")
+        logger.error(f"Request failed: {e}")
         return None, None
 
     data = response.json()
@@ -53,7 +54,7 @@ def get_coordinates(zipcode):
         location = data["results"][0]["geometry"]["location"]
         return location["lat"], location["lng"]
     else:
-        print(f"Error: {data['status']}")
+        logger.error(f"Error: {data['status']}")
         return None, None
 
 def make_request_with_retry(query, retries=3, backoff_factor=1):
