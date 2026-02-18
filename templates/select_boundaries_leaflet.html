@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Select Road Boundaries</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- D3.js Library -->
+    <script src="https://d3js.org/d3.v6.min.js"></script>
+
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px 0;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .header h2 {
+            margin: 0;
+            font-weight: 700;
+        }
+        .main-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }
+        .map-container {
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+        }
+        #map {
+            width: 100%;
+            height: 500px;
+        }
+        .controls-section {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .corner-list {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 20px;
+        }
+        .corner-item {
+            background: #f8f9fa;
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+            font-family: 'Courier New', monospace;
+            font-size: 0.95em;
+        }
+        .corner-item.selected {
+            background: #e7f1ff;
+            border-left-color: #28a745;
+            font-weight: 500;
+        }
+        #submit-btn {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-weight: 600;
+            width: 100%;
+        }
+        #submit-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(40, 167, 69, 0.4);
+        }
+        #submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .button-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .button-row button {
+            flex: 1;
+            padding: 12px 20px;
+            font-size: 1em;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            font-weight: 600;
+            color: white;
+        }
+        #submit-btn {
+            flex: 1;
+        }
+        #restart-btn {
+            background: linear-gradient(135deg, #6c757d 0%, #5a6268 100%);
+        }
+        #restart-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(108, 117, 125, 0.4);
+        }
+        #loading-spinner {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 16px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 16px solid #667eea;
+            width: 120px;
+            height: 120px;
+            animation: spin 2s linear infinite;
+            z-index: 9999;
+        }
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+        .instructions {
+            background: #e7f1ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 25px;
+        }
+        .instructions h5 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        .instructions ol {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .instructions li {
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        /* Custom marker styling */
+        .custom-marker {
+            background-color: #667eea;
+            color: white;
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 14px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>🗺️ Select Delivery Area Boundaries</h2>
+    </div>
+
+    <div class="main-container">
+        <div class="instructions">
+            <h5>How to use:</h5>
+            <ol>
+                <li>Click on the map to mark the first corner of your delivery area</li>
+                <li>Continue clicking to mark corners 2, 3, and 4</li>
+                <li>A polygon will automatically appear showing your boundary area</li>
+                <li>Once all 4 corners are selected, click "Submit Boundaries"</li>
+            </ol>
+        </div>
+
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+
+        <div class="controls-section">
+            <h5>Selected Corners:</h5>
+            <ul class="corner-list">
+                <li class="corner-item" id="corner-1">Corner 1: Not selected</li>
+                <li class="corner-item" id="corner-2">Corner 2: Not selected</li>
+                <li class="corner-item" id="corner-3">Corner 3: Not selected</li>
+                <li class="corner-item" id="corner-4">Corner 4: Not selected</li>
+            </ul>
+
+            <!-- Route Optimization Settings -->
+            <div style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin-top: 20px; border: 1px solid #dee2e6;">
+                <h6 style="color: #667eea; margin-bottom: 15px; font-weight: 600;">⚙️ Route Settings</h6>
+                
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 5px; font-size: 0.9em;">
+                        Coverage Priority:
+                    </label>
+                    <select id="coverage-mode" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 6px; font-size: 0.9em;">
+                        <option value="balanced">Balanced (Default)</option>
+                        <option value="maximum">Maximum Coverage</option>
+                        <option value="major-roads">Major Roads Only</option>
+                    </select>
+                    <small style="color: #666; font-size: 0.8em;">Choose how many streets to include</small>
+                </div>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 8px; font-size: 0.9em;">
+                        Min Street Length: <span id="min-length-value">50</span>m
+                    </label>
+                    <input type="range" id="min-street-length" min="20" max="200" value="50" step="10" 
+                           style="width: 100%;" oninput="document.getElementById('min-length-value').textContent = this.value">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-top: 2px;">
+                        <span>Short (20m)</span>
+                        <span>Long (200m)</span>
+                    </div>
+                    <small style="color: #666; font-size: 0.8em;">Shorter = more coverage, longer = faster routes</small>
+                </div>
+
+                <div style="margin-bottom: 0;">
+                    <label style="display: block; font-weight: 500; margin-bottom: 5px; font-size: 0.9em;">
+                        Route Optimization:
+                    </label>
+                    <select id="speed-priority" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 6px; font-size: 0.9em;">
+                        <option value="balanced">Balanced</option>
+                        <option value="fastest">Fastest Route</option>
+                        <option value="thorough">Most Thorough</option>
+                    </select>
+                    <small style="color: #666; font-size: 0.8em;">Fastest = fewer stops, Thorough = visit more locations</small>
+                </div>
+            </div>
+
+            <div class="button-row">
+                <button id="submit-btn" onclick="submitBoundaries()" disabled>Submit Boundaries</button>
+                <button id="restart-btn" onclick="restartSelection()">↻ Restart</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loading Spinner -->
+    <div id="loading-spinner"></div>
+
+    <!-- Footer with Credits -->
+    <footer style="background: white; border-top: 1px solid #ddd; padding: 20px; text-align: center; margin-top: 30px; font-size: 0.85em; color: #666;">
+        <p style="margin: 5px 0;">
+            <a href="#" onclick="showCredits(event)" style="color: #667eea; text-decoration: none; cursor: pointer;">Credits & Attribution</a>
+        </p>
+        <p style="margin: 5px 0; font-size: 0.8em;">© 2026 Food Truck Route Optimizer | Built with open-source technologies</p>
+    </footer>
+
+    <!-- Credits Modal -->
+    <div id="creditsModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 10px; padding: 30px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+            <h3 style="color: #333; margin-top: 0;">Credits & Attribution</h3>
+            <p style="color: #666; line-height: 1.6;">This project uses the following excellent open-source technologies and services:</p>
+            
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">Mapping & Routing</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>Leaflet.js</strong> - Interactive maps library (BSD 2-Clause License)</li>
+                <li><strong>OpenStreetMap</strong> - Free map data and tiles (ODbL License)</li>
+                <li>< strong>OSRM (Open Source Routing Machine)</strong> - Route optimization engine (AGPL-3.0 License)</li>
+                <li><strong>Nominatim</strong> - Free geocoding service (ODbL License)</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">UI & Frontend</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>Bootstrap 5</strong> - CSS framework (MIT License)</li>
+                <li><strong>D3.js</strong> - Data visualization library (ISC License)</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">Backend</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>Flask</strong> - Web framework (BSD License)</li>
+                <li><strong>NetworkX</strong> - Graph library (BSD License)</li>
+                <li><strong>GeoPy</strong> - Geolocation library (MIT License)</li>
+                <li><strong>Overpass API</strong> - OpenStreetMap data queries</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">Data</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>OpenStreetMap Contributors</strong> - Street data (ODbL License)</li>
+                <li><strong>Humanitarian Data Exchange</strong> - OSM.pbf data</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">Special Thanks</h5>
+            <p style="color: #666; margin: 10px 0; line-height: 1.8;">
+                This application is built on the work of countless open-source contributors. We are grateful for their dedication and innovation.
+            </p>
+
+            <button onclick="closeCredits()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; margin-top: 20px; font-weight: 600;">Close</button>
+        </div>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        let map;
+        let selectedCorners = [];
+        let polygon;
+        let markers = [];
+
+        // Initialize the map with Leaflet
+        function initMap() {
+            const center = [{{ lat | default(41.7508) }}, {{ lng | default(-88.1535) }}];
+            map = L.map('map').setView(center, 12);
+
+            // Add OpenStreetMap tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 19
+            }).addTo(map);
+
+            // Listen for map clicks to select corners
+            map.on('click', function(e) {
+                if (selectedCorners.length < 4) {
+                    const lat = e.latlng.lat;
+                    const lng = e.latlng.lng;
+                    selectedCorners.push({ lat, lng });
+                    updateCornerList();
+                    addMarker(lat, lng);
+                    if (selectedCorners.length === 4) {
+                        drawPolygon();
+                    }
+                }
+            });
+        }
+
+        // Add marker on the map at given lat, lng
+        function addMarker(lat, lng) {
+            const icon = L.divIcon({
+                className: 'custom-marker',
+                html: `<div class="custom-marker">${selectedCorners.length}</div>`,
+                iconSize: [30, 30],
+                iconAnchor: [15, 15]
+            });
+
+            const marker = L.marker([lat, lng], { icon: icon }).addTo(map);
+            marker.bindTooltip(`Corner ${selectedCorners.length}: ${lat.toFixed(4)}, ${lng.toFixed(4)}`, {
+                permanent: false,
+                direction: 'top'
+            });
+            
+            markers.push(marker);
+        }
+
+        // Update corner list on the page
+        function updateCornerList() {
+            for (let i = 0; i < 4; i++) {
+                const cornerElement = document.getElementById(`corner-${i + 1}`);
+                if (selectedCorners[i]) {
+                    cornerElement.textContent = `Corner ${i + 1}: Lat: ${selectedCorners[i].lat.toFixed(4)}, Lng: ${selectedCorners[i].lng.toFixed(4)}`;
+                    cornerElement.classList.add('selected');
+                } else {
+                    cornerElement.textContent = `Corner ${i + 1}: Not selected`;
+                    cornerElement.classList.remove('selected');
+                }
+            }
+
+            if (selectedCorners.length === 4) {
+                document.getElementById("submit-btn").disabled = false;
+            }
+        }
+
+        // Draw the polygon using the selected corners
+        function drawPolygon() {
+            if (polygon) {
+                map.removeLayer(polygon);
+            }
+
+            const polygonPath = selectedCorners.map(corner => [corner.lat, corner.lng]);
+
+            polygon = L.polygon(polygonPath, {
+                color: '#667eea',
+                weight: 3,
+                opacity: 0.8,
+                fillColor: '#667eea',
+                fillOpacity: 0.2
+            }).addTo(map);
+        }
+
+        // Submit the selected boundaries
+        function submitBoundaries() {
+            console.log("submitBoundaries called");
+            console.log("Selected corners:", selectedCorners);
+            
+            if (selectedCorners.length !== 4) {
+                alert("Please select exactly 4 corners.");
+                return;
+            }
+
+            // Get route settings from user input
+            const routeSettings = {
+                coverage_mode: document.getElementById("coverage-mode").value,
+                min_street_length: parseInt(document.getElementById("min-street-length").value),
+                speed_priority: document.getElementById("speed-priority").value
+            };
+
+            console.log("Route settings:", routeSettings);
+
+            // Show loading spinner and disable submit button
+            document.getElementById("loading-spinner").style.display = "block";
+            document.getElementById("submit-btn").disabled = true;
+
+            console.log("Sending boundaries to server...");
+            
+            fetch("/process_boundaries", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                    corners: selectedCorners,
+                    settings: routeSettings
+                }),
+            })
+            .then(response => {
+                console.log("Response status:", response.status);
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'Network response was not ok');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log("Boundary ID:", data.boundary_id);
+                window.location.href = `/graph_leaflet?boundary_id=${data.boundary_id}`;
+            })
+            .catch(error => {
+                console.error("Error:", error);
+                alert(`An error occurred: ${error.message}\n\nPlease try again or try a smaller area.`);
+                document.getElementById("loading-spinner").style.display = "none";
+                document.getElementById("submit-btn").disabled = false;
+            });
+        }
+
+        // Restart selection - clear all corners, polygon, and markers
+        function restartSelection() {
+            selectedCorners = [];
+            updateCornerList();
+            
+            if (polygon) {
+                map.removeLayer(polygon);
+                polygon = null;
+            }
+            
+            // Remove all markers from the map
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+            
+            document.getElementById("submit-btn").disabled = true;
+        }
+
+        function showCredits(event) {
+            event.preventDefault();
+            document.getElementById('creditsModal').style.display = 'flex';
+        }
+        
+        function closeCredits() {
+            document.getElementById('creditsModal').style.display = 'none';
+        }
+        
+        // Close modal when clicking outside
+        document.getElementById('creditsModal').addEventListener('click', function(e) {
+            if (e.target === this) closeCredits();
+        });
+
+        // Initialize map when page loads
+        window.addEventListener('load', initMap);
+    </script>
+</body>
+</html>

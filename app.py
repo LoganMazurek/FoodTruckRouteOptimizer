@@ -77,14 +77,10 @@ def home():
         clat, clng = get_coordinates(zipcode)
         
         if clat and clng:
-            api_key = os.getenv('GOOGLE_MAPS_API_KEY')
-            if not api_key:
-                logger.error("GOOGLE_MAPS_API_KEY environment variable not set")
-                return "API key not configured", 500
-            return render_template("select_boundaries.html", lat=clat, lng=clng, api_key=api_key)
+            return render_template("select_boundaries_leaflet.html", lat=clat, lng=clng)
         else:
             logger.error("Failed to get coordinates for ZIP code")
-            return "Failed to get coords for ZIP code", 500
+            return "Failed to geocode ZIP code. Please try again or enter a different location.", 500
     return render_template("index.html")
 
 @app.route("/process_boundaries", methods=["POST"])

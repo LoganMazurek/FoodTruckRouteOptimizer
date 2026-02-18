@@ -25,8 +25,9 @@ A web-based tool designed to help food trucks and mobile businesses plan optimal
 - **Backend**: Python Flask web framework
 - **Routing**: OSRM (Open Source Routing Machine)
 - **Street Data**: OpenStreetMap via Overpass API
+- **Geocoding**: Nominatim (OpenStreetMap's free geocoding service)
 - **Graph Processing**: NetworkX
-- **Frontend**: Leaflet.js for interactive maps
+- **Frontend**: Leaflet.js for interactive maps with OpenStreetMap tiles
 - **Navigation**: GPX file export for mobile navigation apps
 
 ## Use Cases
@@ -41,7 +42,11 @@ A web-based tool designed to help food trucks and mobile businesses plan optimal
 
 - Python 3.8 or higher
 - OSRM (Open Source Routing Machine) instance running locally or accessible remotely
-- Google Maps API key (for coordinate lookup by ZIP code)
+
+**No API keys required!** This application uses free, open-source services:
+- **Nominatim** for geocoding (converting ZIP codes to coordinates)
+- **OpenStreetMap** for map tiles and street data
+- **OSRM** for routing calculations
 
 ### Setup Steps
 
@@ -62,20 +67,11 @@ A web-based tool designed to help food trucks and mobile businesses plan optimal
    pip install -r requirements.txt
    ```
 
-4. **Set environment variables**
-   ```bash
-   export GOOGLE_MAPS_API_KEY="your_api_key_here"
-   ```
-   On Windows (PowerShell):
-   ```powershell
-   $env:GOOGLE_MAPS_API_KEY="your_api_key_here"
-   ```
-
-5. **Ensure OSRM is running**
+4. **Ensure OSRM is running**
    - Set up OSRM with your desired map data (the project includes Illinois data)
    - OSRM should be accessible at `http://localhost:5000` (configure the URL in `osrm_client.py` if using a different address)
 
-6. **Run the application**
+5. **Run the application**
    ```bash
    python app.py
    ```
@@ -93,37 +89,33 @@ A web-based tool designed to help food trucks and mobile businesses plan optimal
 3. Draw a boundary on the map to define your coverage area
 4. Review the optimized route and export as GPX for navigation apps
 
+## Why No API Keys?
+
+This project is designed to be completely free and open:
+- **Nominatim** provides free geocoding (respecting usage limits)
+- **OpenStreetMap** provides free map tiles and data
+- **Overpass API** provides free street data queries
+- **OSRM** is self-hosted for routing
+
+No credit cards, billing accounts, or API keys required! 🎉
+
 ## Troubleshooting
 
-### Google Maps API "Request Denied" Errors
+### Geocoding Issues (ZIP Code Not Found)
 
-If you see `REQUEST_DENIED` errors when entering a ZIP code:
+If geocoding fails when entering a ZIP code:
 
-1. **Enable the Geocoding API**:
-   - Go to [Google Cloud Console](https://console.cloud.google.com/apis/library)
-   - Search for "Geocoding API"
-   - Click "Enable"
+1. **Nominatim Rate Limiting**: The free Nominatim service has usage limits
+   - Wait a few seconds between requests
+   - For heavy usage, consider running your own Nominatim instance
 
-2. **Check API Key Validity**:
-   - Go to [API Credentials](https://console.cloud.google.com/apis/credentials)
-   - Verify your API key is active and not expired
-   - Check that the key hasn't been accidentally deleted or regenerated
+2. **ZIP Code Format**: 
+   - Use standard US ZIP codes (e.g., "60504")
+   - For other countries, use city names or postal codes in the format "City, Country"
 
-3. **Enable Billing**:
-   - Google Maps APIs require a billing account even though they have a free tier
-   - Go to [Billing](https://console.cloud.google.com/billing) in Google Cloud Console
-   - Attach a billing account to your project
-
-4. **Check API Key Restrictions**:
-   - If you've set IP address restrictions, ensure your droplet's IP is allowed
-   - For HTTP referrer restrictions, these don't apply to server-side requests
-   - Application restrictions should be set to "None" or include your server's IP
-
-5. **Monitor Quota Usage**:
-   - Check your [API quotas](https://console.cloud.google.com/apis/api/geocoding-backend.googleapis.com/quotas)
-   - The free tier includes $200/month in API credits
-
-⚠️ **Security Note**: Never commit your API key to git. Use environment variables only. If your key is exposed in logs, regenerate it immediately.
+3. **Network Issues**: 
+   - Ensure your server can reach `https://nominatim.openstreetmap.org`
+   - Check firewall settings if running on a restricted network
 
 ### Overpass API "Request Denied" Errors
 

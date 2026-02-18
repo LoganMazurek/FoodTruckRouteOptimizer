@@ -2,6 +2,19 @@ import requests
 import json
 
 def get_google_maps_url(route):
+    """
+    Generate Google Maps navigation URLs for the route.
+    
+    Note: This creates public Google Maps URLs and does NOT require an API key.
+    These are simple navigation links that anyone can use. This is an optional
+    convenience feature - the app works completely without Google services.
+    
+    Args:
+        route: List of (lat, lon) coordinate tuples
+        
+    Returns:
+        List of Google Maps URLs (split into chunks due to waypoint limits)
+    """
     MAX_WAYPOINTS = 10  # Google Maps URL limit for waypoints
 
     if len(route) < 2:
