@@ -66,7 +66,13 @@ def process_boundaries():
     center_lat = (min_lat + max_lat) / 2
     center_lng = (min_lng + max_lng) / 2
 
-    street_data = fetch_overpass_data(min_lat, max_lat, min_lng, max_lng)
+    try:
+        street_data = fetch_overpass_data(min_lat, max_lat, min_lng, max_lng)
+    except Exception as e:
+        logger.error(f"Failed to fetch street data: {e}")
+        return jsonify({
+            "error": "Failed to fetch street data from Overpass API. The service may be rate limiting requests. Please try again in a few minutes."
+        }), 503
     
     if not street_data:
         logger.error("No street or intersection data found")
