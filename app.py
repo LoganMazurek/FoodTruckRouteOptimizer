@@ -1,5 +1,6 @@
 import logging
 import uuid
+import warnings
 from flask import Flask, jsonify, render_template, request, session
 import os
 import pickle
@@ -11,7 +12,14 @@ from get_street_data import extract_nodes_and_ways, fetch_overpass_data, get_coo
 from osrm_client import get_route_with_waypoints
 
 app = Flask(__name__)
-app.secret_key = 'z3ByRjbb-tN3VM4X71W2oITQupA='  # Replace with a secure secret key
+# Use environment variable for secret key
+# In production, SECRET_KEY must be set. For development/testing, a random key is generated.
+secret_key = os.environ.get('SECRET_KEY')
+if not secret_key:
+    # For development/testing only - will change on restart
+    warnings.warn("SECRET_KEY environment variable not set. Using random key for development.")
+    secret_key = os.urandom(24)
+app.secret_key = secret_key
 GRAPH_DIR = os.path.join(os.path.dirname(__file__), "temp")
 
 # Configure logging
@@ -22,6 +30,43 @@ logger = logging.getLogger(__name__)
 
 clat = 0
 clng = 0
+
+
+def validate_boundary_id(boundary_id):
+    """Validate that boundary_id is a valid UUID format."""
+    try:
+        uuid.UUID(boundary_id)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def get_safe_file_path(boundary_id, filename_template):
+    """
+    Get a safe file path with validation to prevent path traversal attacks.
+    
+    Args:
+        boundary_id: The UUID boundary identifier
+        filename_template: Template for filename (e.g., "{}_graph.pkl")
+    
+    Returns:
+        Absolute path to the file
+        
+    Raises:
+        ValueError: If the path is invalid or outside the expected directory
+    """
+    filename = filename_template.format(boundary_id)
+    file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
+    
+    # Ensure the resolved path is within the expected directory
+    try:
+        if os.path.commonpath([os.path.abspath(GRAPH_DIR), os.path.abspath(file_path)]) != os.path.abspath(GRAPH_DIR):
+            raise ValueError("Invalid file path")
+    except ValueError:
+        # Raised when paths are on different drives on Windows or invalid path
+        raise ValueError("Invalid file path")
+    
+    return file_path
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -88,7 +133,12 @@ def process_boundaries():
     graph = clean_up_graph(graph)
 
     # Save the graph to a file using pickle
-    graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
+    try:
+        graph_file_path = get_safe_file_path(boundary_id, "{}_graph.pkl")
+    except ValueError:
+        return jsonify({"error": "Invalid graph path"}), 400
+    
+    os.makedirs(GRAPH_DIR, exist_ok=True)
     with open(graph_file_path, "wb") as f:
         pickle.dump(graph, f)
 
@@ -104,8 +154,16 @@ def result():
     boundary_id = request.args.get("boundary_id")
     if not boundary_id:
         return "Missing boundary_id parameter", 400
+    if not validate_boundary_id(boundary_id):
+        return "Invalid boundary_id parameter", 400
+    
     start_node = int(request.args.get("start_node"))
-    graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
+    
+    try:
+        graph_file_path = get_safe_file_path(boundary_id, "{}_graph.pkl")
+    except ValueError:
+        return "Invalid graph path", 400
+    
     if not os.path.exists(graph_file_path):
         return "Graph not found", 404
     with open(graph_file_path, "rb") as graph_file:
@@ -201,7 +259,13 @@ def result():
         'distance_miles': osrm_route_info['total_distance_miles'],
         'duration_min': osrm_route_info['total_duration_min']
     }
-    route_file_path = os.path.join("temp", f"{boundary_id}_route.pkl")
+    
+    try:
+        route_file_path = get_safe_file_path(boundary_id, "{}_route.pkl")
+    except ValueError:
+        return "Invalid route path", 400
+    
+    os.makedirs(GRAPH_DIR, exist_ok=True)
     with open(route_file_path, "wb") as f:
         pickle.dump(route_data, f)
     
@@ -223,7 +287,14 @@ def delete_nodes():
     if not boundary_id or not nodes_to_delete:
         return jsonify({"success": False, "error": "Missing boundary_id or nodes"}), 400
 
-    graph_file_path = os.path.join("temp", f"{boundary_id}_graph.pkl")
+    if not validate_boundary_id(boundary_id):
+        return jsonify({"success": False, "error": "Invalid boundary_id"}), 400
+
+    try:
+        graph_file_path = get_safe_file_path(boundary_id, "{}_graph.pkl")
+    except ValueError:
+        return jsonify({"success": False, "error": "Invalid graph path"}), 400
+
     if not os.path.exists(graph_file_path):
         return jsonify({"success": False, "error": "No graph data found"}), 404
 
@@ -262,16 +333,12 @@ def graph_data():
     boundary_id = request.args.get("boundary_id")
     if not boundary_id:
         return jsonify({"error": "No boundary ID provided"}), 400
-    # Validate boundary_id format (expect a UUID) to limit allowed characters
-    try:
-        uuid.UUID(boundary_id)
-    except (ValueError, TypeError):
+    if not validate_boundary_id(boundary_id):
         return jsonify({"error": "Invalid boundary ID"}), 400
 
-    filename = f"{boundary_id}_graph.pkl"
-    graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
-    # Ensure the resolved path is within the expected directory
-    if not graph_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+    try:
+        graph_file_path = get_safe_file_path(boundary_id, "{}_graph.pkl")
+    except ValueError:
         return jsonify({"error": "Invalid graph path"}), 400
 
     if not os.path.exists(graph_file_path):
@@ -291,16 +358,12 @@ def visualize_cpp():
     start_node = int(request.args.get("start_node"))
     if not boundary_id:
         return jsonify({"error": "No boundary ID provided"}), 400
-    # Validate boundary_id format (expect a UUID) to limit allowed characters
-    try:
-        uuid.UUID(boundary_id)
-    except (ValueError, TypeError):
+    if not validate_boundary_id(boundary_id):
         return jsonify({"error": "Invalid boundary ID"}), 400
 
-    filename = f"{boundary_id}_graph.pkl"
-    graph_file_path = os.path.normpath(os.path.join(GRAPH_DIR, filename))
-    # Ensure the resolved path is within the expected directory
-    if not graph_file_path.startswith(os.path.abspath(GRAPH_DIR) + os.sep):
+    try:
+        graph_file_path = get_safe_file_path(boundary_id, "{}_graph.pkl")
+    except ValueError:
         return jsonify({"error": "Invalid graph path"}), 400
 
     if not os.path.exists(graph_file_path):
@@ -320,9 +383,16 @@ def export_gpx():
     boundary_id = request.args.get("boundary_id")
     if not boundary_id:
         return "Missing boundary_id parameter", 400
+
+    if not validate_boundary_id(boundary_id):
+        return "Invalid boundary_id parameter", 400
     
-    # Load route data from file instead of session
-    route_file_path = os.path.join("temp", f"{boundary_id}_route.pkl")
+    # Load route data from file instead of session, using a safe, normalized path
+    try:
+        route_file_path = get_safe_file_path(boundary_id, "{}_route.pkl")
+    except ValueError:
+        return "Invalid route path", 400
+
     if not os.path.exists(route_file_path):
         return "No route data available", 404
     
