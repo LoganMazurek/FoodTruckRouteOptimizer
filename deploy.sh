@@ -15,7 +15,15 @@ sudo apt-get install -y \
     python3-pip \
     git \
     nginx \
-    supervisor
+    supervisor \
+    docker.io
+
+# Add ubuntu user to docker group
+sudo usermod -aG docker ubuntu || true
+
+# Start and enable Docker
+sudo systemctl start docker
+sudo systemctl enable docker
 
 # Clone repo (or update if exists)
 if [ ! -d "/home/ubuntu/FoodTruckRouteOptimizer" ]; then
@@ -32,12 +40,6 @@ cd /home/ubuntu/FoodTruckRouteOptimizer
 mkdir -p data/illinois
 mkdir -p data/wisconsin
 
-# Check for OSRM backend installation
-if ! command -v osrm-routed &> /dev/null; then
-    echo "📦 Installing OSRM backend..."
-    sudo apt-get install -y osrm-backend
-fi
-
 # Check for OSRM data (should be uploaded separately from local build)
 if [ -f "data/illinois/illinois-260201.osrm" ]; then
     echo "✅ Illinois OSRM data present"
@@ -51,30 +53,38 @@ else
     echo "⚠️  Wisconsin OSRM data not found - upload to data/wisconsin/"
 fi
 
+# Pull OSRM Docker image
+echo "📦 Pulling OSRM Docker image..."
+sudo docker pull osrm/osrm-backend
+
+# Stop and remove old OSRM containers if they exist
+sudo docker stop osrm-illinois osrm-wisconsin 2>/dev/null || true
+sudo docker rm osrm-illinois osrm-wisconsin 2>/dev/null || true
+
+# Start Illinois OSRM container
+if [ -f "data/illinois/illinois-260201.osrm" ]; then
+    echo "🚀 Starting Illinois OSRM server on port 5000..."
+    sudo docker run -d \
+        --name osrm-illinois \
+        --restart always \
+        -p 5000:5000 \
+        -v /home/ubuntu/FoodTruckRouteOptimizer/data/illinois:/data \
+        osrm/osrm-backend osrm-routed --algorithm mld /data/illinois-260201.osrm
+fi
+
+# Start Wisconsin OSRM container
+if [ -f "data/wisconsin/wisconsin-260218.osrm" ]; then
+    echo "🚀 Starting Wisconsin OSRM server on port 5002..."
+    sudo docker run -d \
+        --name osrm-wisconsin \
+        --restart always \
+        -p 5002:5000 \
+        -v /home/ubuntu/FoodTruckRouteOptimizer/data/wisconsin:/data \
+        osrm/osrm-backend osrm-routed --algorithm mld /data/wisconsin-260218.osrm
+fi
+
 # Install Python dependencies
 pip3 install -r requirements.txt
-
-# Create supervisor config for Illinois OSRM
-sudo tee /etc/supervisor/conf.d/osrm-illinois.conf > /dev/null <<EOF
-[program:osrm-illinois]
-command=/usr/bin/osrm-routed --algorithm=MLD --port 5000 /home/ubuntu/FoodTruckRouteOptimizer/data/illinois/illinois-260201.osrm
-autostart=true
-autorestart=true
-user=ubuntu
-stdout_logfile=/var/log/osrm-illinois.log
-stderr_logfile=/var/log/osrm-illinois_error.log
-EOF
-
-# Create supervisor config for Wisconsin OSRM
-sudo tee /etc/supervisor/conf.d/osrm-wisconsin.conf > /dev/null <<EOF
-[program:osrm-wisconsin]
-command=/usr/bin/osrm-routed --algorithm=MLD --port 5002 /home/ubuntu/FoodTruckRouteOptimizer/data/wisconsin/wisconsin-260218.osrm
-autostart=true
-autorestart=true
-user=ubuntu
-stdout_logfile=/var/log/osrm-wisconsin.log
-stderr_logfile=/var/log/osrm-wisconsin_error.log
-EOF
 
 # Create supervisor config for Flask
 sudo tee /etc/supervisor/conf.d/flask.conf > /dev/null <<EOF
@@ -110,10 +120,15 @@ EOF
 sudo systemctl restart nginx
 sudo supervisorctl reread
 sudo supervisorctl update
-sudo supervisorctl start osrm-illinois osrm-wisconsin flask
+sudo supervisorctl start flask
 
 echo "✅ Deployment complete!"
 echo "Visit your server's IP address to access the app"
-echo "OSRM Illinois running on port 5000"
-echo "OSRM Wisconsin running on port 5002"
-echo "View logs with: sudo tail -f /var/log/flask.log"
+echo ""
+echo "OSRM containers running:"
+sudo docker ps --filter name=osrm
+echo ""
+echo "View logs:"
+echo "  Flask: sudo tail -f /var/log/flask.log"
+echo "  Illinois OSRM: sudo docker logs osrm-illinois"
+echo "  Wisconsin OSRM: sudo docker logs osrm-wisconsin"
