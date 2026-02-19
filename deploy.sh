@@ -37,22 +37,8 @@ fi
 
 cd /home/ubuntu/FoodTruckRouteOptimizer
 
-# Create data directories if they don't exist
+# Create data directory if it doesn't exist
 mkdir -p data/illinois
-mkdir -p data/wisconsin
-
-# Check for OSRM data (should be uploaded separately from local build)
-if [ -f "data/illinois/illinois-260201.osrm" ]; then
-    echo "✅ Illinois OSRM data present"
-else
-    echo "⚠️  Illinois OSRM data not found - upload to data/illinois/"
-fi
-
-if [ -f "data/wisconsin/wisconsin-260218.osrm" ]; then
-    echo "✅ Wisconsin OSRM data present"
-else
-    echo "⚠️  Wisconsin OSRM data not found - upload to data/wisconsin/"
-fi
 
 # Pull OSRM Docker image
 echo "📦 Pulling OSRM Docker image..."
@@ -71,17 +57,9 @@ if [ -f "data/illinois/illinois-260201.osrm" ]; then
         -p 5000:5000 \
         -v /home/ubuntu/FoodTruckRouteOptimizer/data/illinois:/data \
         osrm/osrm-backend osrm-routed --algorithm mld /data/illinois-260201.osrm
-fi
-
-# Start Wisconsin OSRM container
-if [ -f "data/wisconsin/wisconsin-260218.osrm" ]; then
-    echo "🚀 Starting Wisconsin OSRM server on port 5002..."
-    sudo docker run -d \
-        --name osrm-wisconsin \
-        --restart always \
-        -p 5002:5000 \
-        -v /home/ubuntu/FoodTruckRouteOptimizer/data/wisconsin:/data \
-        osrm/osrm-backend osrm-routed --algorithm mld /data/wisconsin-260218.osrm
+else
+    echo "⚠️  Illinois OSRM data not found - upload to data/illinois/"
+    echo "    All routing will use public OSRM until Illinois data is uploaded"
 fi
 
 # Create Python virtual environment
@@ -137,7 +115,10 @@ echo ""
 echo "OSRM containers running:"
 sudo docker ps --filter name=osrm
 echo ""
+echo "Routing:"
+echo "  Illinois: Local OSRM (port 5000)"
+echo "  Other states: Public OSRM"
+echo ""
 echo "View logs:"
 echo "  Flask: sudo tail -f /var/log/flask.log"
 echo "  Illinois OSRM: sudo docker logs osrm-illinois"
-echo "  Wisconsin OSRM: sudo docker logs osrm-wisconsin"

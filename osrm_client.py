@@ -4,24 +4,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 # OSRM server configuration
-# Local OSRM servers by state, fall back to public OSRM for other regions
+# Use local OSRM for Illinois, fall back to public OSRM for other regions
 ILLINOIS_OSRM_URL = "http://localhost:5000"
-WISCONSIN_OSRM_URL = "http://localhost:5002"
 PUBLIC_OSRM_URL = "http://router.project-osrm.org"
 
-# State bounding boxes for local OSRM
+# Illinois bounding box for local OSRM
 ILLINOIS_BOUNDS = {
     "min_lat": 36.97,
     "max_lat": 42.51,
     "min_lon": -91.51,
     "max_lon": -87.02
-}
-
-WISCONSIN_BOUNDS = {
-    "min_lat": 42.49,
-    "max_lat": 47.31,
-    "min_lon": -92.89,
-    "max_lon": -86.25
 }
 
 
@@ -31,31 +23,19 @@ def is_in_illinois(lat, lon):
             ILLINOIS_BOUNDS["min_lon"] <= lon <= ILLINOIS_BOUNDS["max_lon"])
 
 
-def is_in_wisconsin(lat, lon):
-    """Check if coordinates are within Wisconsin."""
-    return (WISCONSIN_BOUNDS["min_lat"] <= lat <= WISCONSIN_BOUNDS["max_lat"] and
-            WISCONSIN_BOUNDS["min_lon"] <= lon <= WISCONSIN_BOUNDS["max_lon"])
-
-
 def get_osrm_url(waypoints):
     """
     Determine which OSRM server to use based on waypoints.
-    Returns local server for Illinois or Wisconsin, otherwise public.
+    Returns local server if all waypoints are in Illinois, otherwise public.
     """
     # Check if all waypoints are in Illinois
     all_in_illinois = all(is_in_illinois(lat, lon) for lat, lon in waypoints)
     if all_in_illinois:
-        logger.info("All coordinates in Illinois, using Illinois OSRM")
+        logger.info("All coordinates in Illinois, using local OSRM")
         return ILLINOIS_OSRM_URL
     
-    # Check if all waypoints are in Wisconsin
-    all_in_wisconsin = all(is_in_wisconsin(lat, lon) for lat, lon in waypoints)
-    if all_in_wisconsin:
-        logger.info("All coordinates in Wisconsin, using Wisconsin OSRM")
-        return WISCONSIN_OSRM_URL
-    
     # Otherwise use public OSRM
-    logger.info("Coordinates span multiple states or unknown region, using public OSRM")
+    logger.info("Coordinates outside Illinois, using public OSRM")
     return PUBLIC_OSRM_URL
 
 def get_route_between_points(start_coords, end_coords, overview="full"):
