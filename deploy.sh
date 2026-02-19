@@ -28,45 +28,52 @@ fi
 
 cd /home/ubuntu/FoodTruckRouteOptimizer
 
-# Create data directory if it doesn't exist
-mkdir -p data
+# Create data directories if they don't exist
+mkdir -p data/illinois
+mkdir -p data/wisconsin
 
-# Download OSRM data if not present (this may take 5-15 minutes)
-if [ ! -f "data/illinois-260201.osrm" ]; then
-    echo "📥 Downloading OSRM Illinois data (this may take a few minutes)..."
-    
-    # Install required tools
-    sudo apt-get install -y wget
-    
-    # Download the OSM data
-    wget -O data/illinois-260201.osm.pbf https://download.geofabrik.de/north-america/us/illinois-latest.osm.pbf
-    
-    # Build OSRM data
-    echo "⚙️  Building OSRM database (this may take 5+ minutes)..."
+# Check for OSRM backend installation
+if ! command -v osrm-routed &> /dev/null; then
+    echo "📦 Installing OSRM backend..."
     sudo apt-get install -y osrm-backend
-    
-    cd data
-    osrm-extract -p /usr/share/osrm/profiles/car.lua illinois-260201.osm.pbf
-    osrm-contract illinois-260201.osrm
-    cd ..
-    
-    echo "✅ OSRM data ready!"
+fi
+
+# Check for OSRM data (should be uploaded separately from local build)
+if [ -f "data/illinois/illinois-260201.osrm" ]; then
+    echo "✅ Illinois OSRM data present"
 else
-    echo "✅ OSRM data already present"
+    echo "⚠️  Illinois OSRM data not found - upload to data/illinois/"
+fi
+
+if [ -f "data/wisconsin/wisconsin-260218.osrm" ]; then
+    echo "✅ Wisconsin OSRM data present"
+else
+    echo "⚠️  Wisconsin OSRM data not found - upload to data/wisconsin/"
 fi
 
 # Install Python dependencies
 pip3 install -r requirements.txt
 
-# Create supervisor config for OSRM
-sudo tee /etc/supervisor/conf.d/osrm.conf > /dev/null <<EOF
-[program:osrm]
-command=/usr/bin/osrm-routed --algorithm=MLD /home/ubuntu/FoodTruckRouteOptimizer/data/illinois-260201.osrm
+# Create supervisor config for Illinois OSRM
+sudo tee /etc/supervisor/conf.d/osrm-illinois.conf > /dev/null <<EOF
+[program:osrm-illinois]
+command=/usr/bin/osrm-routed --algorithm=MLD --port 5000 /home/ubuntu/FoodTruckRouteOptimizer/data/illinois/illinois-260201.osrm
 autostart=true
 autorestart=true
 user=ubuntu
-stdout_logfile=/var/log/osrm.log
-stderr_logfile=/var/log/osrm_error.log
+stdout_logfile=/var/log/osrm-illinois.log
+stderr_logfile=/var/log/osrm-illinois_error.log
+EOF
+
+# Create supervisor config for Wisconsin OSRM
+sudo tee /etc/supervisor/conf.d/osrm-wisconsin.conf > /dev/null <<EOF
+[program:osrm-wisconsin]
+command=/usr/bin/osrm-routed --algorithm=MLD --port 5002 /home/ubuntu/FoodTruckRouteOptimizer/data/wisconsin/wisconsin-260218.osrm
+autostart=true
+autorestart=true
+user=ubuntu
+stdout_logfile=/var/log/osrm-wisconsin.log
+stderr_logfile=/var/log/osrm-wisconsin_error.log
 EOF
 
 # Create supervisor config for Flask
@@ -103,8 +110,10 @@ EOF
 sudo systemctl restart nginx
 sudo supervisorctl reread
 sudo supervisorctl update
-sudo supervisorctl start osrm flask
+sudo supervisorctl start osrm-illinois osrm-wisconsin flask
 
 echo "✅ Deployment complete!"
 echo "Visit your server's IP address to access the app"
+echo "OSRM Illinois running on port 5000"
+echo "OSRM Wisconsin running on port 5002"
 echo "View logs with: sudo tail -f /var/log/flask.log"
