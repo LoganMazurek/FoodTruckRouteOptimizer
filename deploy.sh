@@ -83,13 +83,20 @@ if [ -f "data/wisconsin/wisconsin-260218.osrm" ]; then
         osrm/osrm-backend osrm-routed --algorithm mld /data/wisconsin-260218.osrm
 fi
 
-# Install Python dependencies
-pip3 install -r requirements.txt
+# Create Python virtual environment
+if [ ! -d "venv" ]; then
+    echo "📦 Creating Python virtual environment..."
+    python3 -m venv venv
+fi
+
+# Install Python dependencies in venv
+echo "📦 Installing Python dependencies..."
+venv/bin/pip install -r requirements.txt
 
 # Create supervisor config for Flask
 sudo tee /etc/supervisor/conf.d/flask.conf > /dev/null <<EOF
 [program:flask]
-command=/usr/bin/python3 -m waitress --host 127.0.0.1 --port 5001 app:app
+command=/home/ubuntu/FoodTruckRouteOptimizer/venv/bin/python -m waitress --host 127.0.0.1 --port 5001 app:app
 directory=/home/ubuntu/FoodTruckRouteOptimizer
 autostart=true
 autorestart=true
