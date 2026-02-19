@@ -85,8 +85,9 @@ if [ -f "data/wisconsin/wisconsin-260218.osrm" ]; then
 fi
 
 # Create Python virtual environment
-if [ ! -d "venv" ]; then
+if [ ! -f "venv/bin/pip" ]; then
     echo "📦 Creating Python virtual environment..."
+    rm -rf venv
     python3 -m venv venv
 fi
 
