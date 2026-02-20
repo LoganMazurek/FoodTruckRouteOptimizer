@@ -39,14 +39,54 @@ cd /home/ubuntu/FoodTruckRouteOptimizer
 
 # Create data directory if it doesn't exist
 mkdir -p data/illinois
+mkdir -p deploy/osrm
+
+OSRM_PROFILE_DIR="/home/ubuntu/FoodTruckRouteOptimizer/deploy/osrm"
+OSRM_PROFILE_BASE="$OSRM_PROFILE_DIR/car.lua"
+OSRM_PROFILE_CUSTOM="$OSRM_PROFILE_DIR/car.custom.lua"
+OSRM_PBF_PATH="/home/ubuntu/FoodTruckRouteOptimizer/data/illinois/illinois-260201.osm.pbf"
+OSRM_DATA_PATH="/home/ubuntu/FoodTruckRouteOptimizer/data/illinois/illinois-260201.osrm"
 
 # Pull OSRM Docker image
 echo "📦 Pulling OSRM Docker image..."
 sudo docker pull osrm/osrm-backend
 
+# Create a custom profile from the container's default if needed
+if [ ! -f "$OSRM_PROFILE_CUSTOM" ] || [ "${OSRM_REBUILD}" = "1" ]; then
+    echo "🧩 Building custom OSRM profile..."
+    sudo docker run --rm \
+        -v "$OSRM_PROFILE_DIR:/profiles" \
+        osrm/osrm-backend \
+        bash -lc "cat /opt/car.lua > /profiles/car.lua"
+
+    python3 "$OSRM_PROFILE_DIR/patch_car_profile.py" \
+        "$OSRM_PROFILE_BASE" \
+        "$OSRM_PROFILE_CUSTOM"
+fi
+
 # Stop and remove old OSRM containers if they exist
 sudo docker stop osrm-illinois osrm-wisconsin 2>/dev/null || true
 sudo docker rm osrm-illinois osrm-wisconsin 2>/dev/null || true
+
+# Build CH data if requested or missing
+if [ -f "$OSRM_PBF_PATH" ] && ( [ "${OSRM_REBUILD}" = "1" ] || [ ! -f "$OSRM_DATA_PATH" ] ); then
+    echo "🗺️  Building OSRM data (CH)..."
+    sudo docker run --rm -t \
+        -v /home/ubuntu/FoodTruckRouteOptimizer/data/illinois:/data \
+        -v "$OSRM_PROFILE_DIR:/profiles" \
+        osrm/osrm-backend \
+        osrm-extract -p /profiles/car.custom.lua /data/illinois-260201.osm.pbf
+
+    sudo docker run --rm -t \
+        -v /home/ubuntu/FoodTruckRouteOptimizer/data/illinois:/data \
+        osrm/osrm-backend \
+        osrm-partition /data/illinois-260201.osrm
+
+    sudo docker run --rm -t \
+        -v /home/ubuntu/FoodTruckRouteOptimizer/data/illinois:/data \
+        osrm/osrm-backend \
+        osrm-customize /data/illinois-260201.osrm
+fi
 
 # Start Illinois OSRM container
 if [ -f "data/illinois/illinois-260201.osrm" ]; then
@@ -55,6 +95,7 @@ if [ -f "data/illinois/illinois-260201.osrm" ]; then
         --name osrm-illinois \
         --restart always \
         -p 5000:5000 \
+        --memory=1g \
         -v /home/ubuntu/FoodTruckRouteOptimizer/data/illinois:/data \
         osrm/osrm-backend osrm-routed --algorithm mld /data/illinois-260201.osrm
 else
