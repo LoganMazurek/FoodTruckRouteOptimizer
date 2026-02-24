@@ -10,6 +10,8 @@ git pull origin main
 bash deploy.sh
 ```
 
+**Note:** The deploy script now preserves SSL certificates. Your HTTPS configuration will remain intact after redeployment.
+
 ## SSL Certificate Setup (First Time Only)
 
 If you get `NET::ERR_CERT_COMMON_NAME_INVALID`, you need to set up SSL:
@@ -18,12 +20,31 @@ If you get `NET::ERR_CERT_COMMON_NAME_INVALID`, you need to set up SSL:
 # Install certbot
 sudo apt-get install -y certbot python3-certbot-nginx
 
-# Get SSL certificate (replace email)
+# Get SSL certificate (replace email with your email)
 sudo certbot --nginx -d nroute.loganmazurek.com --non-interactive --agree-tos --email your.email@example.com
 
 # Test auto-renewal
 sudo certbot renew --dry-run
 ```
+
+**Important:** The deploy script now preserves SSL certificates! Once you run certbot once, redeploying won't break HTTPS.
+
+### Certbot Auto-Renewal
+
+Certbot automatically sets up a systemd timer for certificate renewal. Check it with:
+
+```bash
+# Check renewal timer status
+sudo systemctl status certbot.timer
+
+# Test renewal (dry run)
+sudo certbot renew --dry-run
+
+# List certificates
+sudo certbot certificates
+```
+
+Certificates auto-renew 30 days before expiration.
 
 ## Troubleshooting
 
@@ -114,6 +135,36 @@ sudo docker restart osrm-illinois
 # View OSRM logs
 sudo docker logs osrm-illinois
 ```
+
+#### SSL Certificate Issues
+
+If HTTPS is not working or you see `NET::ERR_CERT_COMMON_NAME_INVALID`:
+
+```bash
+# Check if certificate exists
+sudo ls -la /etc/letsencrypt/live/nroute.loganmazurek.com/
+
+# View certificate details
+sudo certbot certificates
+
+# If certificate exists, redeploy to update nginx config
+cd /home/ubuntu/FoodTruckRouteOptimizer
+bash deploy.sh
+
+# If certificate doesn't exist, set it up
+bash setup_ssl.sh  # (edit email in script first)
+# OR manually:
+sudo certbot --nginx -d nroute.loganmazurek.com
+
+# Check nginx configuration
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+**Common SSL Issues:**
+- **Certificate expired**: Run `sudo certbot renew --force-renewal`
+- **Nginx not using SSL**: Check `/etc/nginx/sites-available/default` has SSL config
+- **Certbot not auto-renewing**: Check `sudo systemctl status certbot.timer`
 
 ### 5. Manual Service Control
 

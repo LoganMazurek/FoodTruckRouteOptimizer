@@ -140,7 +140,45 @@ stderr_logfile=/var/log/flask_error.log
 EOF
 
 # Configure Nginx as reverse proxy
-sudo tee /etc/nginx/sites-available/default > /dev/null <<EOF
+# Check if SSL certificate exists - if yes, preserve SSL config
+if [ -f "/etc/letsencrypt/live/nroute.loganmazurek.com/fullchain.pem" ]; then
+    echo "🔐 SSL certificate found - configuring HTTPS..."
+    sudo tee /etc/nginx/sites-available/default > /dev/null <<EOF
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name nroute.loganmazurek.com;
+    
+    # Redirect HTTP to HTTPS
+    return 301 https://\$server_name\$request_uri;
+}
+
+server {
+    listen 443 ssl http2 default_server;
+    listen [::]:443 ssl http2 default_server;
+    server_name nroute.loganmazurek.com;
+
+    # SSL configuration
+    ssl_certificate /etc/letsencrypt/live/nroute.loganmazurek.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/nroute.loganmazurek.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+
+    location / {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Host \$server_name;
+    }
+}
+EOF
+else
+    echo "⚠️  No SSL certificate found - configuring HTTP only..."
+    echo "    Run 'sudo certbot --nginx -d nroute.loganmazurek.com' to enable HTTPS"
+    sudo tee /etc/nginx/sites-available/default > /dev/null <<EOF
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -156,6 +194,7 @@ server {
     }
 }
 EOF
+fi
 
 # Restart services
 echo "🔄 Restarting services..."
