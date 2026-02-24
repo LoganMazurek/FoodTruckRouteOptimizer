@@ -153,6 +153,44 @@
             color: #333;
             margin-bottom: 5px;
         }
+        .search-section {
+            background: white;
+            border-radius: 10px;
+            padding: 16px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .search-input {
+            flex: 1;
+            min-width: 220px;
+            padding: 10px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 8px;
+            font-size: 0.95em;
+        }
+        .search-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .search-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.35);
+        }
+        #search-status {
+            width: 100%;
+            color: #666;
+            font-size: 0.85em;
+        }
         
         /* Custom marker styling */
         .custom-marker {
@@ -205,6 +243,12 @@
                 <li>A polygon will automatically appear showing your boundary area</li>
                 <li>Once all 4 corners are selected, click "Submit Boundaries"</li>
             </ol>
+        </div>
+
+        <div class="search-section">
+            <input id="location-search" class="search-input" type="text" placeholder="Enter city or ZIP code">
+            <button class="search-btn" type="button" onclick="geocodeLocation()">Go</button>
+            <div id="search-status">Tip: try a city like "Naperville, IL" or a ZIP like "60540".</div>
         </div>
 
         <div class="map-container">
@@ -289,6 +333,7 @@
         let selectedCorners = [];
         let polygon;
         let markers = [];
+        let searchMarker;
 
         // Initialize the map with Leaflet
         function initMap() {
@@ -313,6 +358,46 @@
                         drawPolygon();
                     }
                 }
+            });
+        }
+
+        function geocodeLocation() {
+            const query = document.getElementById("location-search").value.trim();
+            const status = document.getElementById("search-status");
+
+            if (!query) {
+                status.textContent = "Please enter a city or ZIP code.";
+                return;
+            }
+
+            status.textContent = "Searching...";
+
+            fetch("/geocode", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: query })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || "Unable to find that location.");
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                const lat = data.lat;
+                const lng = data.lng;
+                map.setView([lat, lng], 13);
+                status.textContent = `Centered on ${lat.toFixed(4)}, ${lng.toFixed(4)}.`;
+
+                if (searchMarker) {
+                    map.removeLayer(searchMarker);
+                }
+                searchMarker = L.marker([lat, lng]).addTo(map);
+            })
+            .catch(error => {
+                status.textContent = error.message;
             });
         }
 
@@ -426,6 +511,14 @@
             // Remove all markers from the map
             markers.forEach(marker => map.removeLayer(marker));
             markers = [];
+
+            if (searchMarker) {
+                map.removeLayer(searchMarker);
+                searchMarker = null;
+            }
+
+            document.getElementById("location-search").value = "";
+            document.getElementById("search-status").textContent = "Tip: try a city like \"Naperville, IL\" or a ZIP like \"60540\".";
             
             document.getElementById("submit-btn").disabled = true;
         }
@@ -445,7 +538,16 @@
         });
 
         // Initialize map when page loads
-        window.addEventListener('load', initMap);
+        window.addEventListener('load', () => {
+            initMap();
+            const searchInput = document.getElementById("location-search");
+            searchInput.addEventListener("keydown", (event) => {
+                if (event.key === "Enter") {
+                    event.preventDefault();
+                    geocodeLocation();
+                }
+            });
+        });
     </script>
 </body>
 </html>

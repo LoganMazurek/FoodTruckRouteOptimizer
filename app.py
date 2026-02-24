@@ -92,6 +92,31 @@ def home():
             return f"Internal server error: {str(e)}", 500
     return render_template("index.html")
 
+
+@app.route("/select_boundaries")
+def select_boundaries():
+    return render_template("select_boundaries.html")
+
+
+@app.route("/geocode", methods=["POST"])
+def geocode_location():
+    data = request.get_json()
+    query = (data.get("query") or "").strip()
+
+    if not query:
+        return jsonify({"error": "Please enter a city or ZIP code."}), 400
+
+    try:
+        lat, lng = get_coordinates(query)
+    except Exception as e:
+        logger.error(f"Geocoding failed for '{query}': {e}")
+        return jsonify({"error": "Geocoding failed. Please try again."}), 500
+
+    if lat is None or lng is None:
+        return jsonify({"error": "Location not found. Try a different city or ZIP code."}), 404
+
+    return jsonify({"lat": lat, "lng": lng})
+
 @app.route("/process_boundaries", methods=["POST"])
 def process_boundaries():
     data = request.get_json()

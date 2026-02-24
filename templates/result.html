@@ -197,6 +197,33 @@
             color: white;
         }
 
+        .boundary-link {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            height: 38px;
+            padding: 0 12px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            color: white;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s, background-color 0.2s;
+            z-index: 9999;
+        }
+
+        .boundary-link:hover {
+            background: rgba(255, 255, 255, 0.35);
+            transform: translateY(-1px);
+        }
+
         .btn-secondary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
@@ -265,6 +292,7 @@
     </style>
 </head>
 <body>
+    <a href="/select_boundaries" class="boundary-link" title="Back to boundary selection">Boundaries</a>
     <a href="https://loganmazurek.com" class="router-link" title="Back to main router">🚪</a>
     <div class="header">
         <h1>🚚 Optimized Route</h1>

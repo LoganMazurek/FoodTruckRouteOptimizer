@@ -195,9 +195,36 @@
             background: rgba(255, 255, 255, 0.35);
             transform: translateY(-1px);
         }
+        .boundary-link {
+            position: fixed;
+            top: 15px;
+            right: 62px;
+            height: 38px;
+            padding: 0 12px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            color: white;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s, background-color 0.2s;
+            z-index: 9999;
+        }
+
+        .boundary-link:hover {
+            background: rgba(255, 255, 255, 0.35);
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body class="bg-light">
+    <a href="/select_boundaries" class="boundary-link" title="Back to boundary selection">Boundaries</a>
     <a href="https://loganmazurek.com" class="router-link" title="Back to main router">🚪</a>
     <div class="header">
         <div class="main-container">
@@ -214,7 +241,7 @@
                 <li><strong>Set Start Point:</strong> Select a starting node and click "Set as Start" (it will turn green)</li>
                 <li><strong>Delete Nodes (Optional):</strong> Select multiple nodes and click "Delete Selected Nodes" to exclude them from the route</li>
                 <li><strong>Optimize Route:</strong> Click "Optimize Route" to calculate the shortest path visiting all selected nodes</li>
-                <li><strong>View Results:</strong> Once optimized, red lines show the final route. Blue lines indicate segments you'll travel twice</li>
+                <li><strong>View Results:</strong> The optimized route shows as a single clean path; repeated segments use a dashed overlay</li>
                 <li><strong>Get Directions:</strong> Click "View Directions" for turn-by-turn navigation</li>
             </ol>
         </div>
@@ -306,9 +333,9 @@
                         </div>
                         <div class="legend-item">
                             <div class="legend-line">
-                                <div style="height: 3px; width: 20px; background-color: #0074D9; font-weight: bold;"></div>
+                                <div style="height: 3px; width: 20px; border-bottom: 3px dashed #d1001f;"></div>
                             </div>
-                            <span>Doubled-back Segment</span>
+                            <span>Repeated Segment</span>
                         </div>
                     </div>
                 </div>
@@ -322,7 +349,7 @@
                             <li>Click nodes on the map to select/deselect them - remove any unwanted nodes like small dead-end streets, busy roads</li>
                             <li>Check for duplicate nodes on bigger streets (2+ lanes)</li>
                             <li>The optimization calculates a 'goldilocks' path of medium coverage and speed</li>
-                            <li>Blue lines show streets you'll traverse twice</li>
+                            <li>Dashed overlays show streets you'll traverse twice</li>
                         </ul>
                     </div>
                 </div>
@@ -403,7 +430,7 @@
         let startNodeId = null;
         let endNodeId = null;
         let nodeMarkers = {};
-        let routePolyline = null;
+        let routeLayerGroup = null;
 
         function updateMarkerStyles() {
             Object.entries(nodeMarkers).forEach(([id, marker]) => {
@@ -536,35 +563,50 @@
                         alert('No route found.');
                         return;
                     }
-                    if (routePolyline) {
-                        map.removeLayer(routePolyline);
+                    if (routeLayerGroup) {
+                        map.removeLayer(routeLayerGroup);
                     }
-                    let route = data.route;
-                    let i = 1;
-                    let segmentCounts = {};
+
+                    const route = data.route;
+                    routeLayerGroup = L.layerGroup().addTo(map);
+
+                    const baseLine = L.polyline(route, {
+                        color: '#d1001f',
+                        weight: 6,
+                        opacity: 0.85,
+                        lineCap: 'round',
+                        lineJoin: 'round'
+                    }).addTo(routeLayerGroup);
+
+                    const segmentCounts = {};
+                    const segments = [];
                     function segmentKey(a, b) {
-                        return a[0] + ',' + a[1] + '|' + b[0] + ',' + b[1];
+                        const aKey = `${a[0].toFixed(6)},${a[1].toFixed(6)}`;
+                        const bKey = `${b[0].toFixed(6)},${b[1].toFixed(6)}`;
+                        return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
                     }
-                    routePolyline = L.polyline([route[0]], {color: '#d1001f', weight: 10, opacity: 1.0}).addTo(map);
-                    map.fitBounds(L.polyline(route, {weight:1}).getBounds());
-                    function animateRoute() {
-                        if (i >= route.length) {
-                            document.getElementById('view-directions-btn').style.display = '';
-                            return;
-                        }
-                        let prev = route[i-1];
-                        let curr = route[i];
-                        let key = segmentKey(prev, curr);
-                        let revKey = segmentKey(curr, prev);
+
+                    for (let i = 1; i < route.length; i++) {
+                        const prev = route[i - 1];
+                        const curr = route[i];
+                        const key = segmentKey(prev, curr);
                         segmentCounts[key] = (segmentCounts[key] || 0) + 1;
-                        segmentCounts[revKey] = segmentCounts[key];
-                        let color = segmentCounts[key] > 1 ? '#0074D9' : '#d1001f';
-                        L.polyline([prev, curr], {color: color, weight: 10, opacity: 1.0}).addTo(map);
-                        routePolyline.addLatLng(curr);
-                        i++;
-                        setTimeout(animateRoute, 150);
+                        segments.push({ prev, curr, key });
                     }
-                    animateRoute();
+
+                    segments.forEach(segment => {
+                        if (segmentCounts[segment.key] > 1) {
+                            L.polyline([segment.prev, segment.curr], {
+                                color: '#d1001f',
+                                weight: 8,
+                                opacity: 0.4,
+                                dashArray: '6 6'
+                            }).addTo(routeLayerGroup);
+                        }
+                    });
+
+                    map.fitBounds(baseLine.getBounds());
+                    document.getElementById('view-directions-btn').style.display = '';
                 })
                 .catch(err => {
                     hideSpinner();
