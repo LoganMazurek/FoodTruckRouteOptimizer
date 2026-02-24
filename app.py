@@ -160,15 +160,20 @@ def process_boundaries():
     graph = simplify_graph(nodes, ways)
     graph = clean_up_graph(graph)
 
-    # Save the graph to a file using pickle
+    # Save both the graph and the raw nodes/ways for rebuilding with different settings
     try:
         graph_file_path = get_safe_file_path(boundary_id, "{}_graph.pkl")
+        nodes_ways_file_path = get_safe_file_path(boundary_id, "{}_nodes_ways.pkl")
     except ValueError:
         return jsonify({"error": "Invalid graph path"}), 400
     
     os.makedirs(GRAPH_DIR, exist_ok=True)
     with open(graph_file_path, "wb") as f:
         pickle.dump(graph, f)
+    
+    # Save original nodes and ways for later graph rebuilding with different settings
+    with open(nodes_ways_file_path, "wb") as f:
+        pickle.dump({"nodes": nodes, "ways": ways}, f)
 
     return jsonify({"boundary_id": boundary_id})
 
@@ -408,36 +413,27 @@ def visualize_cpp():
         return jsonify({"error": "Invalid boundary ID"}), 400
 
     try:
-        graph_file_path = get_safe_file_path(boundary_id, "{}_graph.pkl")
+        nodes_ways_file_path = get_safe_file_path(boundary_id, "{}_nodes_ways.pkl")
     except ValueError:
-        return jsonify({"error": "Invalid graph path"}), 400
+        return jsonify({"error": "Invalid file path"}), 400
 
-    if not os.path.exists(graph_file_path):
-        return jsonify({"error": "Graph not found"}), 404
-    with open(graph_file_path, "rb") as graph_file:
-        import pickle
-        graph = pickle.load(graph_file)
+    if not os.path.exists(nodes_ways_file_path):
+        return jsonify({"error": "Nodes/ways data not found"}), 404
     
-    # Rebuild graph with user-provided settings so they actually affect the route
+    # Load the original nodes and ways
+    with open(nodes_ways_file_path, "rb") as f:
+        import pickle
+        data = pickle.load(f)
+        nodes = data["nodes"]
+        ways = data["ways"]
+    
+    # Rebuild graph with user-provided settings
     settings = {
         'coverage_mode': coverage_mode,
         'min_street_length': min_street_length,
         'speed_priority': speed_priority
     }
     logger.debug(f"Rebuilding graph with settings: {settings}")
-    
-    # Extract nodes and ways from the base graph to rebuild with new settings
-    nodes = {}
-    ways = []
-    for node_id, node_data in graph.nodes(data=True):
-        nodes[node_id] = node_data['coordinates']
-    for u, v in graph.edges():
-        # Reconstruct way info - simplified since we lost original way data
-        ways.append({
-            'name': f'edge_{u}_{v}',
-            'nodes': [u, v],
-            'highway': 'residential'
-        })
     
     graph = simplify_graph(nodes, ways, settings=settings)
     graph = clean_up_graph(graph)
