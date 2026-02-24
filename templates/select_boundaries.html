@@ -220,48 +220,6 @@
                 <li class="corner-item" id="corner-4">Corner 4: Not selected</li>
             </ul>
 
-            <!-- Route Optimization Settings -->
-            <div style="background: #f8f9fa; border-radius: 8px; padding: 15px; margin-top: 20px; border: 1px solid #dee2e6;">
-                <h6 style="color: #667eea; margin-bottom: 15px; font-weight: 600;">⚙️ Route Settings</h6>
-                
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; font-weight: 500; margin-bottom: 5px; font-size: 0.9em;">
-                        Coverage Priority:
-                    </label>
-                    <select id="coverage-mode" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 6px; font-size: 0.9em;">
-                        <option value="balanced">Balanced (Default)</option>
-                        <option value="maximum">Maximum Coverage</option>
-                        <option value="major-roads">Major Roads Only</option>
-                    </select>
-                    <small style="color: #666; font-size: 0.8em;">Choose how many streets to include</small>
-                </div>
-
-                <div style="margin-bottom: 15px;">
-                    <label style="display: block; font-weight: 500; margin-bottom: 8px; font-size: 0.9em;">
-                        Min Street Length: <span id="min-length-value">50</span>m
-                    </label>
-                    <input type="range" id="min-street-length" min="20" max="200" value="50" step="10" 
-                           style="width: 100%;" oninput="document.getElementById('min-length-value').textContent = this.value">
-                    <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-top: 2px;">
-                        <span>Short (20m)</span>
-                        <span>Long (200m)</span>
-                    </div>
-                    <small style="color: #666; font-size: 0.8em;">Shorter = more coverage, longer = faster routes</small>
-                </div>
-
-                <div style="margin-bottom: 0;">
-                    <label style="display: block; font-weight: 500; margin-bottom: 5px; font-size: 0.9em;">
-                        Route Optimization:
-                    </label>
-                    <select id="speed-priority" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 6px; font-size: 0.9em;">
-                        <option value="balanced">Balanced</option>
-                        <option value="fastest">Fastest Route</option>
-                        <option value="thorough">Most Thorough</option>
-                    </select>
-                    <small style="color: #666; font-size: 0.8em;">Fastest = fewer stops, Thorough = visit more locations</small>
-                </div>
-            </div>
-
             <div class="button-row">
                 <button id="submit-btn" onclick="submitBoundaries()" disabled>Submit Boundaries</button>
                 <button id="restart-btn" onclick="restartSelection()">↻ Restart</button>
@@ -421,15 +379,6 @@
                 return;
             }
 
-            // Get route settings from user input
-            const routeSettings = {
-                coverage_mode: document.getElementById("coverage-mode").value,
-                min_street_length: parseInt(document.getElementById("min-street-length").value),
-                speed_priority: document.getElementById("speed-priority").value
-            };
-
-            console.log("Route settings:", routeSettings);
-
             // Show loading spinner and disable submit button
             document.getElementById("loading-spinner").style.display = "block";
             document.getElementById("submit-btn").disabled = true;
@@ -440,8 +389,7 @@
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ 
-                    corners: selectedCorners,
-                    settings: routeSettings
+                    corners: selectedCorners
                 }),
             })
             .then(response => {

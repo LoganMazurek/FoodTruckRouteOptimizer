@@ -96,14 +96,12 @@ def home():
 def process_boundaries():
     data = request.get_json()
     corners = data.get("corners")
-    settings = data.get("settings", {})
 
     if len(corners) != 4:
         logger.error("Invalid number of corners, expected 4")
         return jsonify({"error": "Please select exactly 4 corners."}), 400
 
     logger.debug(f"Processing boundaries with corners: {corners}")
-    logger.debug(f"Route settings: {settings}")
 
     latitudes = [corner['lat'] for corner in corners]
     longitudes = [corner['lng'] for corner in corners]
@@ -134,7 +132,7 @@ def process_boundaries():
 
     nodes, ways = extract_nodes_and_ways(street_data)
 
-    graph = simplify_graph(nodes, ways, settings=settings)
+    graph = simplify_graph(nodes, ways)
     graph = clean_up_graph(graph)
 
     # Save the graph to a file using pickle
