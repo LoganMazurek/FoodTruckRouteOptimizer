@@ -102,6 +102,10 @@
             padding: 10px 15px;
             transition: transform 0.2s, box-shadow 0.2s;
         }
+        .btn-compact {
+            padding: 8px 10px;
+            font-size: 0.85em;
+        }
         .btn:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
@@ -204,7 +208,7 @@
             border-radius: 10px;
             background: rgba(255, 255, 255, 0.2);
             border: 1px solid rgba(255, 255, 255, 0.35);
-            color: white;
+            color: rgb(0, 0, 0);
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -291,20 +295,20 @@
                     </div>
                 </div>
 
-                <div class="controls-section">
-                    <div class="btn-group-vertical">
-                        <button id="set-start-btn" class="btn btn-success" disabled>📍 Set as Start</button>
-                        <button id="set-end-btn" class="btn btn-info" disabled>🏁 Set as End</button>
-                        <button id="optimize-btn" class="btn btn-danger" disabled>⚡ Optimize Route</button>
-                        <button id="view-directions-btn" class="btn btn-warning" style="display:none">🗺️ View Directions</button>
-                        <button id="animate-route-btn" class="btn btn-primary" style="display:none">🎬 Animate Route</button>
-                        <button id="delete-btn" class="btn btn-secondary" disabled>🗑️ Delete Selected Nodes</button>
-                    </div>
-                </div>
             </div>
 
             <!-- Sidebar -->
             <div class="sidebar">
+                <div class="controls-section">
+                    <div class="btn-group-vertical">
+                        <button id="set-start-btn" class="btn btn-success btn-compact" disabled>📍 Set as Start</button>
+                        <button id="set-end-btn" class="btn btn-info btn-compact" disabled>🏁 Set as End</button>
+                        <button id="optimize-btn" class="btn btn-danger btn-compact" disabled>⚡ Optimize Route</button>
+                        <button id="view-directions-btn" class="btn btn-warning btn-compact" style="display:none">🗺️ View Directions</button>
+                        <button id="animate-route-btn" class="btn btn-primary btn-compact" style="display:none">🎬 Animate Route</button>
+                        <button id="delete-btn" class="btn btn-secondary btn-compact" disabled>🗑️ Delete Selected Nodes</button>
+                    </div>
+                </div>
                 <div class="card legend">
                     <div class="card-header">
                         Legend
@@ -618,7 +622,7 @@
                         color: '#d1001f',
                         weight: 8,
                         opacity: 0.4,
-                        dashArray: '6 6'
+                        dashArray: '12 10'
                     }).addTo(routeLayerGroup);
                 }
             });
