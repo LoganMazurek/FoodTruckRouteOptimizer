@@ -5,6 +5,9 @@ set -e
 
 echo "🚀 Deploying Food Truck Route Optimizer..."
 
+DOMAIN="nroute.loganmazurek.com"
+CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
+
 # Update system
 sudo apt-get update
 sudo apt-get upgrade -y
@@ -141,13 +144,13 @@ EOF
 
 # Configure Nginx as reverse proxy
 # Check if SSL certificate exists - if yes, preserve SSL config
-if [ -f "/etc/letsencrypt/live/nroute.loganmazurek.com/fullchain.pem" ]; then
+if [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
     echo "🔐 SSL certificate found - configuring HTTPS..."
     sudo tee /etc/nginx/sites-available/default > /dev/null <<EOF
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
-    server_name nroute.loganmazurek.com;
+    server_name $DOMAIN;
     
     # Redirect HTTP to HTTPS
     return 301 https://\$server_name\$request_uri;
@@ -156,11 +159,11 @@ server {
 server {
     listen 443 ssl http2 default_server;
     listen [::]:443 ssl http2 default_server;
-    server_name nroute.loganmazurek.com;
+    server_name $DOMAIN;
 
     # SSL configuration
-    ssl_certificate /etc/letsencrypt/live/nroute.loganmazurek.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/nroute.loganmazurek.com/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers on;
     ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
@@ -177,7 +180,6 @@ server {
 EOF
 else
     echo "⚠️  No SSL certificate found - configuring HTTP only..."
-    echo "    Run 'sudo certbot --nginx -d nroute.loganmazurek.com' to enable HTTPS"
     sudo tee /etc/nginx/sites-available/default > /dev/null <<EOF
 server {
     listen 80 default_server;
@@ -196,13 +198,32 @@ server {
 EOF
 fi
 
+# Attempt automated SSL setup if email is provided
+if [ -n "$CERTBOT_EMAIL" ] && [ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+    echo "🔐 Attempting automated SSL setup for $DOMAIN..."
+    sudo apt-get install -y certbot python3-certbot-nginx
+    sudo systemctl reload nginx || true
+
+    if ! sudo certbot --nginx -d "$DOMAIN" \
+        --non-interactive \
+        --agree-tos \
+        --email "$CERTBOT_EMAIL" \
+        --redirect; then
+        echo "⚠️  Certbot failed. Ensure DNS points to this server and try again."
+    fi
+fi
+
 # Restart services
 echo "🔄 Restarting services..."
-sudo supervisorctl stop flask || true
 sudo systemctl restart nginx
 sudo supervisorctl reread
 sudo supervisorctl update
-sudo supervisorctl start flask
+
+if sudo supervisorctl status flask | grep -q RUNNING; then
+    sudo supervisorctl restart flask
+else
+    sudo supervisorctl start flask
+fi
 
 # Wait a moment for services to start
 sleep 3
