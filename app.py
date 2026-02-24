@@ -22,6 +22,9 @@ if not secret_key:
 app.secret_key = secret_key
 GRAPH_DIR = os.path.join(os.path.dirname(__file__), "temp")
 
+# Ensure temp directory exists
+os.makedirs(GRAPH_DIR, exist_ok=True)
+
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
@@ -72,15 +75,21 @@ def get_safe_file_path(boundary_id, filename_template):
 @app.route("/", methods=["GET", "POST"])
 def home():
     if request.method == "POST":
-        logger.debug("POST request received")
-        zipcode = request.form.get("zipcode")
-        clat, clng = get_coordinates(zipcode)
-        
-        if clat and clng:
-            return render_template("select_boundaries.html", lat=clat, lng=clng)
-        else:
-            logger.error("Failed to get coordinates for ZIP code")
-            return "Failed to geocode ZIP code. Please try again or enter a different location.", 500
+        try:
+            logger.debug("POST request received")
+            zipcode = request.form.get("zipcode")
+            logger.debug(f"Geocoding ZIP code: {zipcode}")
+            clat, clng = get_coordinates(zipcode)
+            
+            if clat and clng:
+                logger.info(f"Successfully geocoded {zipcode} to ({clat}, {clng})")
+                return render_template("select_boundaries.html", lat=clat, lng=clng)
+            else:
+                logger.error("Failed to get coordinates for ZIP code")
+                return "Failed to geocode ZIP code. Please try again or enter a different location.", 500
+        except Exception as e:
+            logger.error(f"Error processing ZIP code: {e}", exc_info=True)
+            return f"Internal server error: {str(e)}", 500
     return render_template("index.html")
 
 @app.route("/process_boundaries", methods=["POST"])
@@ -472,6 +481,19 @@ def export_gpx():
             'Content-Type': 'application/gpx+xml; charset=utf-8'
         }
     )
+
+@app.route("/health")
+def health():
+    """Health check endpoint for monitoring"""
+    import sys
+    health_status = {
+        "status": "healthy",
+        "python_version": sys.version,
+        "flask_running": True,
+        "temp_dir_exists": os.path.exists(GRAPH_DIR),
+        "temp_dir_writable": os.access(GRAPH_DIR, os.W_OK) if os.path.exists(GRAPH_DIR) else False
+    }
+    return jsonify(health_status)
 
 if __name__ == "__main__":
     app.run(debug=False, host='0.0.0.0', port=5001)

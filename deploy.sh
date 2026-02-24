@@ -37,9 +37,14 @@ fi
 
 cd /home/ubuntu/FoodTruckRouteOptimizer
 
-# Create data directory if it doesn't exist
+# Create necessary directories if they don't exist
 mkdir -p data/illinois
 mkdir -p deploy/osrm
+mkdir -p temp
+
+# Set proper permissions
+chown -R ubuntu:ubuntu /home/ubuntu/FoodTruckRouteOptimizer
+chmod -R 755 /home/ubuntu/FoodTruckRouteOptimizer/temp
 
 OSRM_PROFILE_DIR="/home/ubuntu/FoodTruckRouteOptimizer/deploy/osrm"
 OSRM_PROFILE_BASE="$OSRM_PROFILE_DIR/car.lua"
@@ -122,6 +127,7 @@ directory=/home/ubuntu/FoodTruckRouteOptimizer
 autostart=true
 autorestart=true
 user=ubuntu
+environment=SECRET_KEY="$(openssl rand -hex 32)",FLASK_ENV="production"
 stdout_logfile=/var/log/flask.log
 stderr_logfile=/var/log/flask_error.log
 EOF
@@ -145,13 +151,20 @@ server {
 EOF
 
 # Restart services
+echo "🔄 Restarting services..."
+sudo supervisorctl stop flask || true
 sudo systemctl restart nginx
 sudo supervisorctl reread
 sudo supervisorctl update
 sudo supervisorctl start flask
 
+# Wait a moment for services to start
+sleep 3
+
 echo "✅ Deployment complete!"
 echo "Visit your server's IP address to access the app"
+echo ""
+echo "Health check available at: http://localhost:5001/health"
 echo ""
 echo "OSRM containers running:"
 sudo docker ps --filter name=osrm
@@ -162,4 +175,8 @@ echo "  Other states: Public OSRM"
 echo ""
 echo "View logs:"
 echo "  Flask: sudo tail -f /var/log/flask.log"
+echo "  Flask errors: sudo tail -f /var/log/flask_error.log"
 echo "  Illinois OSRM: sudo docker logs osrm-illinois"
+echo ""
+echo "Check deployment health:"
+echo "  bash /home/ubuntu/FoodTruckRouteOptimizer/check_deployment.sh"
