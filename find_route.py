@@ -126,18 +126,21 @@ def simplify_graph(nodes, ways, settings=None):
     min_length = settings.get('min_street_length', MIN_STREET_LENGTH_METERS)
     speed_priority = settings.get('speed_priority', 'balanced')
     
-    logger.debug(f"Building graph with settings: coverage={coverage_mode}, min_length={min_length}m, speed={speed_priority}")
+    logger.info(f"[SIMPLIFY_GRAPH] Building graph with: coverage={coverage_mode}, min_length={min_length}m, speed={speed_priority}")
     
     # Determine which road types to exclude based on coverage mode
     if coverage_mode == 'maximum':
         # Maximum coverage - only exclude truly non-drivable paths
         excluded_types = ["footway", "path", "cycleway", "steps"]
+        logger.debug(f"[SIMPLIFY_GRAPH] Coverage=maximum: excluded types = {excluded_types}")
     elif coverage_mode == 'major-roads':
         # Major roads only - exclude residential and service roads
         excluded_types = ["footway", "track", "pedestrian", "path", "cycleway", "service", "residential", "unclassified"]
+        logger.debug(f"[SIMPLIFY_GRAPH] Coverage=major-roads: excluded types = {excluded_types}")
     else:  # balanced
         # Balanced - exclude only non-drivable
         excluded_types = ["footway", "track", "pedestrian", "path", "cycleway"]
+        logger.debug(f"[SIMPLIFY_GRAPH] Coverage=balanced: excluded types = {excluded_types}")
     
     node_to_ways = {}
 
@@ -162,6 +165,8 @@ def simplify_graph(nodes, ways, settings=None):
         
         for node_id in node_list:
             node_to_ways.setdefault(node_id, set()).add(way_id)
+
+    logger.debug(f"[SIMPLIFY_GRAPH] After filtering: {len(node_to_ways)} relevant nodes from {len(ways)} ways")
 
     # Intersections are nodes that belong to more than 1 way
     intersections = {nid for nid, ways_set in node_to_ways.items() if len(ways_set) > 1}
@@ -236,6 +241,8 @@ def simplify_graph(nodes, ways, settings=None):
     largest_cc = max(nx.connected_components(simplified_graph), key=len)
     simplified_graph = simplified_graph.subgraph(largest_cc).copy()
 
+    logger.info(f"[SIMPLIFY_GRAPH] Final graph: {simplified_graph.number_of_nodes()} nodes, {simplified_graph.number_of_edges()} edges")
+    
     return simplified_graph
 
 
@@ -444,7 +451,7 @@ def filter_turns(route, threshold_degrees=70, way_ids=None, min_distance_meters=
     filtered.append(route[-1])
     return filtered
 
-def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_uturns=True):
+def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_uturns=True, settings=None):
     """
     Max-coverage variant with U-turn penalty at intersections (degree 3+).
     Uses greedy edge selection with a penalty (not hard block) for U-turns.
@@ -452,7 +459,18 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     
     If end_node is specified, the route will try to end at that node instead of
     returning to the start. This allows for A-to-B routes with maximum coverage.
+    
+    Args:
+        graph: NetworkX graph
+        start_node: Starting node
+        end_node: Optional ending node
+        forbid_uturns: Whether to penalize U-turns
+        settings: Optional dict with:
+            - speed_priority: 'fastest' (80% threshold), 'balanced' (80% threshold), 'thorough' (95% threshold)
     """
+    settings = settings or {}
+    speed_priority = settings.get('speed_priority', 'balanced')
+    
     import time
     G = graph.copy()
     
@@ -465,7 +483,17 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     prev = None
     total_edges = set(frozenset(e) for e in G.edges)
     MAX_EDGE_REUSE = 2
-    COVERAGE_THRESHOLD = 0.80
+    
+    # Adjust coverage threshold based on speed_priority
+    if speed_priority == 'fastest':
+        COVERAGE_THRESHOLD = 0.75  # Exit earlier for faster completion
+        logger.debug(f"[FIND_ROUTE] Speed priority=fastest: using {COVERAGE_THRESHOLD*100:.0f}% coverage threshold")
+    elif speed_priority == 'thorough':
+        COVERAGE_THRESHOLD = 0.95  # Try to cover as much as possible
+        logger.debug(f"[FIND_ROUTE] Speed priority=thorough: using {COVERAGE_THRESHOLD*100:.0f}% coverage threshold")
+    else:  # balanced
+        COVERAGE_THRESHOLD = 0.80  # Standard balanced approach
+        logger.debug(f"[FIND_ROUTE] Speed priority=balanced: using {COVERAGE_THRESHOLD*100:.0f}% coverage threshold")
     
     start_time = time.time()
     
@@ -485,7 +513,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
             coverage_pct = len(used_edges) / len(total_edges)
             if coverage_pct >= COVERAGE_THRESHOLD or iteration > len(total_edges):
                 reached_end_node = True
-                print(f"[DEBUG] Reached end node with {coverage_pct*100:.1f}% coverage")
+                logger.debug(f"[FIND_ROUTE] Reached end node with {coverage_pct*100:.1f}% coverage")
                 break
         
         best_candidate = None
@@ -534,8 +562,13 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
             if end_node and coverage_pct >= COVERAGE_THRESHOLD * 0.9:
                 priority = (is_forced_uturn, reuse_count, not is_unused, distance_to_end, edge_length)
             else:
-                # Otherwise prioritize coverage
-                priority = (is_forced_uturn, reuse_count, not is_unused, edge_length, distance_to_end)
+                # Otherwise prioritize coverage (but consider speed_priority)
+                if speed_priority == 'fastest':
+                    # For fastest: weight toward shorter edges even if not unused
+                    priority = (is_forced_uturn, reuse_count, not is_unused, edge_length, distance_to_end)
+                else:
+                    # For balanced/thorough: standard priority
+                    priority = (is_forced_uturn, reuse_count, not is_unused, edge_length, distance_to_end)
             
             if best_candidate is None or priority < best_priority:
                 best_priority = priority
@@ -554,9 +587,9 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
                         edge_usage_count[edge] += 1
                         current_node = node
                     reached_end_node = True
-                    print(f"[DEBUG] Navigated to end node via shortest path")
+                    logger.debug(f"[FIND_ROUTE] Navigated to end node via shortest path")
                 except nx.NetworkXNoPath:
-                    print(f"[DEBUG] No path to end node from {current_node}")
+                    logger.debug(f"[FIND_ROUTE] No path to end node from {current_node}")
             break
         
         edge = frozenset([current_node, best_candidate])
@@ -577,9 +610,9 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     
     if end_node:
         end_status = "reached" if reached_end_node or current_node == end_node else "not reached"
-        print(f"[DEBUG] max_coverage_optimized: {coverage*100:.1f}% coverage ({len(used_edges)}/{len(total_edges)} edges), end node {end_status}")
+        logger.debug(f"[FIND_ROUTE] max_coverage_optimized: {coverage*100:.1f}% coverage ({len(used_edges)}/{len(total_edges)} edges), end node {end_status}, speed_priority={speed_priority}")
     else:
-        print(f"[DEBUG] max_coverage_optimized: {coverage*100:.1f}% coverage ({len(used_edges)}/{len(total_edges)} edges)")
+        logger.debug(f"[FIND_ROUTE] max_coverage_optimized: {coverage*100:.1f}% coverage ({len(used_edges)}/{len(total_edges)} edges), speed_priority={speed_priority}")
     
     coordinates_route = [(G.nodes[n]['coordinates'][0], G.nodes[n]['coordinates'][1]) for n in path]
     return coordinates_route

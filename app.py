@@ -210,11 +210,19 @@ def result():
     with open(graph_file_path, "rb") as graph_file:
         import pickle
         graph = pickle.load(graph_file)
+    
     print("Graph node IDs:", list(graph.nodes))
     print("Optimizing route...")
     print(f"Start node: {start_node}, End node: {end_node}")
-    # Use max coverage optimized route with end_node support
-    optimized_route = find_route_max_coverage_optimized(graph, start_node, end_node)
+    logger.info(f"[RESULT] Optimizing with settings: coverage_mode={coverage_mode}, min_street_length={min_street_length}m, speed_priority={speed_priority}")
+    
+    # Use max coverage optimized route with end_node support and settings
+    settings_for_route = {
+        'coverage_mode': coverage_mode,
+        'min_street_length': min_street_length,
+        'speed_priority': speed_priority
+    }
+    optimized_route = find_route_max_coverage_optimized(graph, start_node, end_node, settings=settings_for_route)
     def is_latlon_tuple(x):
         return isinstance(x, (list, tuple)) and len(x) == 2 and all(isinstance(i, (float, int)) for i in x)
     if not optimized_route or not is_latlon_tuple(optimized_route[0]):
@@ -433,14 +441,26 @@ def visualize_cpp():
         'min_street_length': min_street_length,
         'speed_priority': speed_priority
     }
-    logger.debug(f"Rebuilding graph with settings: {settings}")
+    logger.info(f"[VISUALIZE_CPP] Received settings from request: coverage_mode={coverage_mode}, min_street_length={min_street_length}m, speed_priority={speed_priority}")
+    logger.info(f"[VISUALIZE_CPP] Original data: {len(nodes)} nodes, {len(ways)} ways")
     
     graph = simplify_graph(nodes, ways, settings=settings)
-    graph = clean_up_graph(graph)
+    logger.info(f"[VISUALIZE_CPP] Graph after simplify_graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
     
-    # Use the max coverage optimized algorithm with end_node support
-    route = find_route_max_coverage_optimized(graph, start_node, end_node)
-    return jsonify({"route": route})
+    graph = clean_up_graph(graph)
+    logger.info(f"[VISUALIZE_CPP] Graph after clean_up_graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
+    
+    # Use the max coverage optimized algorithm with end_node support and settings
+    route = find_route_max_coverage_optimized(graph, start_node, end_node, settings=settings)
+    logger.info(f"[VISUALIZE_CPP] Generated route with {len(route)} waypoints")
+    
+    # Prevent browser caching of dynamic route results
+    from flask import make_response
+    response = make_response(jsonify({"route": route}))
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @app.route("/export_gpx")
 def export_gpx():
