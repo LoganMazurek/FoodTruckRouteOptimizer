@@ -418,6 +418,30 @@ def visualize_cpp():
         import pickle
         graph = pickle.load(graph_file)
     
+    # Rebuild graph with user-provided settings so they actually affect the route
+    settings = {
+        'coverage_mode': coverage_mode,
+        'min_street_length': min_street_length,
+        'speed_priority': speed_priority
+    }
+    logger.debug(f"Rebuilding graph with settings: {settings}")
+    
+    # Extract nodes and ways from the base graph to rebuild with new settings
+    nodes = {}
+    ways = []
+    for node_id, node_data in graph.nodes(data=True):
+        nodes[node_id] = node_data['coordinates']
+    for u, v in graph.edges():
+        # Reconstruct way info - simplified since we lost original way data
+        ways.append({
+            'name': f'edge_{u}_{v}',
+            'nodes': [u, v],
+            'highway': 'residential'
+        })
+    
+    graph = simplify_graph(nodes, ways, settings=settings)
+    graph = clean_up_graph(graph)
+    
     # Use the max coverage optimized algorithm with end_node support
     route = find_route_max_coverage_optimized(graph, start_node, end_node)
     return jsonify({"route": route})
