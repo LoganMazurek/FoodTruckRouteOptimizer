@@ -510,16 +510,12 @@
         document.getElementById('set-start-btn').onclick = function() {
             startNodeId = selectedNodeId;
             updateMarkerStyles();
-            document.getElementById('set-start-btn').disabled = true;
-            document.getElementById('set-end-btn').disabled = true;
             checkReady();
         };
 
         document.getElementById('set-end-btn').onclick = function() {
             endNodeId = selectedNodeId;
             updateMarkerStyles();
-            document.getElementById('set-start-btn').disabled = true;
-            document.getElementById('set-end-btn').disabled = true;
             checkReady();
         };
 
@@ -542,6 +538,8 @@
                 alert('Please select a start node first.');
                 return;
             }
+            const optimizeBtn = document.getElementById('optimize-btn');
+            optimizeBtn.disabled = true;
             showSpinner();
             
             // Get route settings
@@ -559,6 +557,7 @@
             fetch(url)
                 .then(response => {
                     hideSpinner();
+                    optimizeBtn.disabled = false;
                     if (!response.ok) {
                         alert('Failed to fetch route.');
                         return Promise.reject();
@@ -577,6 +576,7 @@
                 })
                 .catch(err => {
                     hideSpinner();
+                    optimizeBtn.disabled = false;
                     if (err) console.error(err);
                 });
         };
