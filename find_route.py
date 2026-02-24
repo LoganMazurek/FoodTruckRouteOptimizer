@@ -449,6 +449,9 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     Max-coverage variant with U-turn penalty at intersections (degree 3+).
     Uses greedy edge selection with a penalty (not hard block) for U-turns.
     This maintains coverage while gently preferring non-U-turn routes.
+    
+    If end_node is specified, the route will try to end at that node instead of
+    returning to the start. This allows for A-to-B routes with maximum coverage.
     """
     import time
     G = graph.copy()
@@ -469,6 +472,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     # Greedy traversal with U-turn penalty
     max_iterations = len(total_edges) * 3
     iteration = 0
+    reached_end_node = False
     
     while iteration < max_iterations:
         iteration += 1
@@ -476,8 +480,16 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         if not neighbors:
             break
         
+        # Check if we're at the end node with good coverage
+        if end_node and current_node == end_node:
+            coverage_pct = len(used_edges) / len(total_edges)
+            if coverage_pct >= COVERAGE_THRESHOLD or iteration > len(total_edges):
+                reached_end_node = True
+                print(f"[DEBUG] Reached end node with {coverage_pct*100:.1f}% coverage")
+                break
+        
         best_candidate = None
-        best_priority = (False, 999999, False, 999999)  # (is_forced_uturn, reuse, edge_len)
+        best_priority = (False, 999999, False, 999999, 999999)  # (is_forced_uturn, reuse, not_unused, distance_to_end, edge_len)
         
         for n in neighbors:
             edge = frozenset([current_node, n])
@@ -488,6 +500,13 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
             edge_length = G[current_node][n].get("weight", 1)
             is_unused = edge not in used_edges
             reuse_count = edge_usage_count[edge]
+            
+            # Calculate distance to end node (if specified) for tie-breaking
+            distance_to_end = 999999
+            if end_node and end_node in G.nodes:
+                end_coords = G.nodes[end_node]['coordinates']
+                next_coords = G.nodes[n]['coordinates']
+                distance_to_end = haversine(next_coords[0], next_coords[1], end_coords[0], end_coords[1])
             
             # Check if this is a U-turn
             is_uturn = False
@@ -507,15 +526,37 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
                     if current_node in intersections:
                         is_forced_uturn = True  # Penalize but don't forbid
             
-            # Priority: prefer unused, then lower reuse, then prefer non-U-turns, then shorter edges
-            priority = (is_forced_uturn, reuse_count, not is_unused, edge_length)
+            # Priority: prefer unused edges, then lower reuse, then prefer non-U-turns, 
+            # then closer to end (if specified), then shorter edges
+            coverage_pct = len(used_edges) / len(total_edges)
+            
+            # If we have good coverage and end_node is set, prioritize getting to end
+            if end_node and coverage_pct >= COVERAGE_THRESHOLD * 0.9:
+                priority = (is_forced_uturn, reuse_count, not is_unused, distance_to_end, edge_length)
+            else:
+                # Otherwise prioritize coverage
+                priority = (is_forced_uturn, reuse_count, not is_unused, edge_length, distance_to_end)
             
             if best_candidate is None or priority < best_priority:
                 best_priority = priority
                 best_candidate = n
         
         if best_candidate is None:
-            # No more moves
+            # No more moves - if we have an end node, try to navigate there
+            if end_node and current_node != end_node:
+                # Try to find a path to end node using shortest path
+                try:
+                    shortest_path = nx.shortest_path(G, current_node, end_node)
+                    for node in shortest_path[1:]:  # Skip current node
+                        path.append(node)
+                        edge = frozenset([current_node, node])
+                        used_edges.add(edge)
+                        edge_usage_count[edge] += 1
+                        current_node = node
+                    reached_end_node = True
+                    print(f"[DEBUG] Navigated to end node via shortest path")
+                except nx.NetworkXNoPath:
+                    print(f"[DEBUG] No path to end node from {current_node}")
             break
         
         edge = frozenset([current_node, best_candidate])
@@ -525,14 +566,20 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         prev = current_node
         current_node = best_candidate
         
-        # Early exit if coverage good enough
+        # Early exit if coverage good enough and at end node (or no end node specified)
         coverage_pct = len(used_edges) / len(total_edges)
         if coverage_pct >= COVERAGE_THRESHOLD and iteration > len(total_edges):
-            break
+            if end_node is None or current_node == end_node:
+                break
     
     elapsed = time.time() - start_time
     coverage = len(used_edges) / len(total_edges)
-    print(f"[DEBUG] max_coverage_optimized: {coverage*100:.1f}% coverage ({len(used_edges)}/{len(total_edges)} edges)")
+    
+    if end_node:
+        end_status = "reached" if reached_end_node or current_node == end_node else "not reached"
+        print(f"[DEBUG] max_coverage_optimized: {coverage*100:.1f}% coverage ({len(used_edges)}/{len(total_edges)} edges), end node {end_status}")
+    else:
+        print(f"[DEBUG] max_coverage_optimized: {coverage*100:.1f}% coverage ({len(used_edges)}/{len(total_edges)} edges)")
     
     coordinates_route = [(G.nodes[n]['coordinates'][0], G.nodes[n]['coordinates'][1]) for n in path]
     return coordinates_route

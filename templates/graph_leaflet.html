@@ -127,6 +127,11 @@
             background: #6c757d;
             border-color: #6c757d;
         }
+        .btn-info {
+            background: #17a2b8;
+            border-color: #17a2b8;
+            color: white;
+        }
         .instructions {
             background: #e7f1ff;
             border-left: 4px solid #667eea;
@@ -217,9 +222,52 @@
         <div class="content-wrapper">
             <div>
                 <div id="map" class="mb-3"></div>
+                <!-- Route Configuration Options -->
+                <div class="controls-section" style="margin-bottom: 20px;">
+                    <h6 style="color: #667eea; margin-bottom: 15px; font-weight: 600;">⚙️ Route Settings</h6>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; font-weight: 500; margin-bottom: 5px; font-size: 0.9em;">
+                            Coverage Priority:
+                        </label>
+                        <select id="coverage-mode" class="form-select form-select-sm">
+                            <option value="balanced">Balanced (Default)</option>
+                            <option value="maximum">Maximum Coverage</option>
+                            <option value="major-roads">Major Roads Only</option>
+                        </select>
+                        <small style="color: #666; font-size: 0.8em;">Choose how many streets to include</small>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; font-weight: 500; margin-bottom: 8px; font-size: 0.9em;">
+                            Min Street Length: <span id="min-length-value">50</span>m
+                        </label>
+                        <input type="range" id="min-street-length" class="form-range" min="20" max="200" value="50" step="10" 
+                               oninput="document.getElementById('min-length-value').textContent = this.value">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.75em; color: #666; margin-top: 2px;">
+                            <span>Short (20m)</span>
+                            <span>Long (200m)</span>
+                        </div>
+                        <small style="color: #666; font-size: 0.8em;">Shorter = more coverage, longer = faster routes</small>
+                    </div>
+
+                    <div style="margin-bottom: 0;">
+                        <label style="display: block; font-weight: 500; margin-bottom: 5px; font-size: 0.9em;">
+                            Route Optimization:
+                        </label>
+                        <select id="speed-priority" class="form-select form-select-sm">
+                            <option value="balanced">Balanced</option>
+                            <option value="fastest">Fastest Route</option>
+                            <option value="thorough">Most Thorough</option>
+                        </select>
+                        <small style="color: #666; font-size: 0.8em;">Fastest = fewer stops, Thorough = visit more locations</small>
+                    </div>
+                </div>
+
                 <div class="controls-section">
                     <div class="btn-group-vertical">
                         <button id="set-start-btn" class="btn btn-success" disabled>📍 Set as Start</button>
+                        <button id="set-end-btn" class="btn btn-info" disabled>🏁 Set as End</button>
                         <button id="optimize-btn" class="btn btn-danger" disabled>⚡ Optimize Route</button>
                         <button id="view-directions-btn" class="btn btn-warning" style="display:none">🗺️ View Directions</button>
                         <button id="delete-btn" class="btn btn-secondary" disabled>🗑️ Delete Selected Nodes</button>
@@ -247,8 +295,8 @@
                             <span>Start Node</span>
                         </div>
                         <div class="legend-item">
-                            <div class="legend-dot" style="background-color: #0074D9;"></div>
-                            <span>End Node / Backtrack</span>
+                            <div class="legend-dot" style="background-color: #17a2b8;"></div>
+                            <span>End Node</span>
                         </div>
                         <div class="legend-item">
                             <div class="legend-line">
@@ -271,10 +319,10 @@
                     </div>
                     <div class="card-body" style="font-size: 0.9em;">
                         <ul style="margin: 0; padding-left: 18px;">
-                            <li>Click nodes on the map to select/deselect them</li>
-                            <li>The optimization calculates the shortest Eulerian path</li>
+                            <li>Click nodes on the map to select/deselect them - remove any unwanted nodes like small dead-end streets, busy roads</li>
+                            <li>Check for duplicate nodes on bigger streets (2+ lanes)</li>
+                            <li>The optimization calculates a 'goldilocks' path of medium coverage and speed</li>
                             <li>Blue lines show streets you'll traverse twice</li>
-                            <li>Route planning uses real street data</li>
                         </ul>
                     </div>
                 </div>
@@ -353,6 +401,7 @@
         let selectedNodeIds = [];
         let selectedNodeId = null;
         let startNodeId = null;
+        let endNodeId = null;
         let nodeMarkers = {};
         let routePolyline = null;
 
@@ -361,6 +410,8 @@
                 const nodeId = parseInt(id, 10);
                 if (nodeId === startNodeId) {
                     marker.setStyle({fillColor: "#2ECC40"});
+                } else if (nodeId === endNodeId) {
+                    marker.setStyle({fillColor: "#17a2b8"});
                 } else if (selectedNodeIds.includes(nodeId)) {
                     marker.setStyle({fillColor: "#FFD700"});
                 } else {
@@ -372,6 +423,7 @@
         function onNodeClick(e, nodeId) {
             selectedNodeId = nodeId;
             document.getElementById('set-start-btn').disabled = false;
+            document.getElementById('set-end-btn').disabled = false;
             const idx = selectedNodeIds.indexOf(nodeId);
             if (idx === -1) {
                 selectedNodeIds.push(nodeId);
@@ -425,10 +477,21 @@
             startNodeId = selectedNodeId;
             updateMarkerStyles();
             document.getElementById('set-start-btn').disabled = true;
+            document.getElementById('set-end-btn').disabled = true;
+            checkReady();
+        };
+
+        document.getElementById('set-end-btn').onclick = function() {
+            endNodeId = selectedNodeId;
+            updateMarkerStyles();
+            document.getElementById('set-start-btn').disabled = true;
+            document.getElementById('set-end-btn').disabled = true;
             checkReady();
         };
 
         function checkReady() {
+            // Enable optimize button only if start node is set
+            // End node is optional - if not set, route will return to start
             document.getElementById('optimize-btn').disabled = !startNodeId;
         }
 
@@ -446,7 +509,20 @@
                 return;
             }
             showSpinner();
-            fetch(`/visualize_cpp?boundary_id=${boundaryId}&start_node=${startNodeId}`)
+            
+            // Get route settings
+            const coverageMode = document.getElementById('coverage-mode').value;
+            const minStreetLength = document.getElementById('min-street-length').value;
+            const speedPriority = document.getElementById('speed-priority').value;
+            
+            // Build URL with parameters
+            let url = `/visualize_cpp?boundary_id=${boundaryId}&start_node=${startNodeId}`;
+            if (endNodeId) {
+                url += `&end_node=${endNodeId}`;
+            }
+            url += `&coverage_mode=${coverageMode}&min_street_length=${minStreetLength}&speed_priority=${speedPriority}`;
+            
+            fetch(url)
                 .then(response => {
                     hideSpinner();
                     if (!response.ok) {
@@ -497,7 +573,16 @@
         };
 
         document.getElementById('view-directions-btn').onclick = function() {
-            window.location.href = `/result?boundary_id=${boundaryId}&start_node=${startNodeId}`;
+            let url = `/result?boundary_id=${boundaryId}&start_node=${startNodeId}`;
+            if (endNodeId) {
+                url += `&end_node=${endNodeId}`;
+            }
+            // Add route settings
+            const coverageMode = document.getElementById('coverage-mode').value;
+            const minStreetLength = document.getElementById('min-street-length').value;
+            const speedPriority = document.getElementById('speed-priority').value;
+            url += `&coverage_mode=${coverageMode}&min_street_length=${minStreetLength}&speed_priority=${speedPriority}`;
+            window.location.href = url;
         };
 
         function showCredits(event) {

@@ -77,7 +77,7 @@ def home():
         clat, clng = get_coordinates(zipcode)
         
         if clat and clng:
-            return render_template("select_boundaries_leaflet.html", lat=clat, lng=clng)
+            return render_template("select_boundaries.html", lat=clat, lng=clng)
         else:
             logger.error("Failed to get coordinates for ZIP code")
             return "Failed to geocode ZIP code. Please try again or enter a different location.", 500
@@ -154,6 +154,14 @@ def result():
         return "Invalid boundary_id parameter", 400
     
     start_node = int(request.args.get("start_node"))
+    end_node = request.args.get("end_node")
+    if end_node:
+        end_node = int(end_node)
+    
+    # Get route settings
+    coverage_mode = request.args.get("coverage_mode", "balanced")
+    min_street_length = int(request.args.get("min_street_length", 50))
+    speed_priority = request.args.get("speed_priority", "balanced")
     
     try:
         graph_file_path = get_safe_file_path(boundary_id, "{}_graph.pkl")
@@ -167,8 +175,9 @@ def result():
         graph = pickle.load(graph_file)
     print("Graph node IDs:", list(graph.nodes))
     print("Optimizing route...")
-    # --- Use only the CPP route logic ---
-    optimized_route = find_route_max_coverage_optimized(graph, start_node)
+    print(f"Start node: {start_node}, End node: {end_node}")
+    # Use max coverage optimized route with end_node support
+    optimized_route = find_route_max_coverage_optimized(graph, start_node, end_node)
     def is_latlon_tuple(x):
         return isinstance(x, (list, tuple)) and len(x) == 2 and all(isinstance(i, (float, int)) for i in x)
     if not optimized_route or not is_latlon_tuple(optimized_route[0]):
@@ -352,6 +361,15 @@ def graph_data():
 def visualize_cpp():
     boundary_id = request.args.get("boundary_id")
     start_node = int(request.args.get("start_node"))
+    end_node = request.args.get("end_node")
+    if end_node:
+        end_node = int(end_node)
+    
+    # Get route settings
+    coverage_mode = request.args.get("coverage_mode", "balanced")
+    min_street_length = int(request.args.get("min_street_length", 50))
+    speed_priority = request.args.get("speed_priority", "balanced")
+    
     if not boundary_id:
         return jsonify({"error": "No boundary ID provided"}), 400
     if not validate_boundary_id(boundary_id):
@@ -367,7 +385,9 @@ def visualize_cpp():
     with open(graph_file_path, "rb") as graph_file:
         import pickle
         graph = pickle.load(graph_file)
-    route = find_route_cpp(graph, start_node)
+    
+    # Use the max coverage optimized algorithm with end_node support
+    route = find_route_max_coverage_optimized(graph, start_node, end_node)
     return jsonify({"route": route})
 
 @app.route("/export_gpx")
