@@ -297,6 +297,7 @@
                         <button id="set-end-btn" class="btn btn-info" disabled>🏁 Set as End</button>
                         <button id="optimize-btn" class="btn btn-danger" disabled>⚡ Optimize Route</button>
                         <button id="view-directions-btn" class="btn btn-warning" style="display:none">🗺️ View Directions</button>
+                        <button id="animate-route-btn" class="btn btn-primary" style="display:none">🎬 Animate Route</button>
                         <button id="delete-btn" class="btn btn-secondary" disabled>🗑️ Delete Selected Nodes</button>
                     </div>
                 </div>
@@ -431,6 +432,8 @@
         let endNodeId = null;
         let nodeMarkers = {};
         let routeLayerGroup = null;
+        let lastRoute = null;
+        let animationTimer = null;
 
         function updateMarkerStyles() {
             Object.entries(nodeMarkers).forEach(([id, marker]) => {
@@ -563,51 +566,99 @@
                         alert('No route found.');
                         return;
                     }
-                    if (routeLayerGroup) {
-                        map.removeLayer(routeLayerGroup);
-                    }
-
-                    const route = data.route;
-                    routeLayerGroup = L.layerGroup().addTo(map);
-
-                    const baseLine = L.polyline(route, {
-                        color: '#d1001f',
-                        weight: 6,
-                        opacity: 0.85,
-                        lineCap: 'round',
-                        lineJoin: 'round'
-                    }).addTo(routeLayerGroup);
-
-                    const segmentCounts = {};
-                    const segments = [];
-                    function segmentKey(a, b) {
-                        const aKey = `${a[0].toFixed(6)},${a[1].toFixed(6)}`;
-                        const bKey = `${b[0].toFixed(6)},${b[1].toFixed(6)}`;
-                        return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
-                    }
-
-                    for (let i = 1; i < route.length; i++) {
-                        const prev = route[i - 1];
-                        const curr = route[i];
-                        const key = segmentKey(prev, curr);
-                        segmentCounts[key] = (segmentCounts[key] || 0) + 1;
-                        segments.push({ prev, curr, key });
-                    }
-
-                    segments.forEach(segment => {
-                        if (segmentCounts[segment.key] > 1) {
-                            L.polyline([segment.prev, segment.curr], {
-                                color: '#d1001f',
-                                weight: 8,
-                                opacity: 0.4,
-                                dashArray: '6 6'
-                            }).addTo(routeLayerGroup);
-                        }
-                    });
-
-                    map.fitBounds(baseLine.getBounds());
+                    lastRoute = data.route;
+                    renderRoute(lastRoute);
                     document.getElementById('view-directions-btn').style.display = '';
+                    document.getElementById('animate-route-btn').style.display = '';
                 })
+                        function renderRoute(route) {
+                            if (routeLayerGroup) {
+                                map.removeLayer(routeLayerGroup);
+                            }
+                            if (animationTimer) {
+                                clearTimeout(animationTimer);
+                                animationTimer = null;
+                            }
+
+                            routeLayerGroup = L.layerGroup().addTo(map);
+
+                            const baseLine = L.polyline(route, {
+                                color: '#d1001f',
+                                weight: 6,
+                                opacity: 0.85,
+                                lineCap: 'round',
+                                lineJoin: 'round'
+                            }).addTo(routeLayerGroup);
+
+                            const segmentCounts = {};
+                            const segments = [];
+                            function segmentKey(a, b) {
+                                const aKey = `${a[0].toFixed(6)},${a[1].toFixed(6)}`;
+                                const bKey = `${b[0].toFixed(6)},${b[1].toFixed(6)}`;
+                                return aKey < bKey ? `${aKey}|${bKey}` : `${bKey}|${aKey}`;
+                            }
+
+                            for (let i = 1; i < route.length; i++) {
+                                const prev = route[i - 1];
+                                const curr = route[i];
+                                const key = segmentKey(prev, curr);
+                                segmentCounts[key] = (segmentCounts[key] || 0) + 1;
+                                segments.push({ prev, curr, key });
+                            }
+
+                            segments.forEach(segment => {
+                                if (segmentCounts[segment.key] > 1) {
+                                    L.polyline([segment.prev, segment.curr], {
+                                        color: '#d1001f',
+                                        weight: 8,
+                                        opacity: 0.4,
+                                        dashArray: '6 6'
+                                    }).addTo(routeLayerGroup);
+                                }
+                            });
+
+                            map.fitBounds(baseLine.getBounds());
+                        }
+
+                        function animateRoute(route) {
+                            if (routeLayerGroup) {
+                                map.removeLayer(routeLayerGroup);
+                            }
+                            if (animationTimer) {
+                                clearTimeout(animationTimer);
+                                animationTimer = null;
+                            }
+
+                            routeLayerGroup = L.layerGroup().addTo(map);
+                            const animatedLine = L.polyline([route[0]], {
+                                color: '#d1001f',
+                                weight: 6,
+                                opacity: 0.85,
+                                lineCap: 'round',
+                                lineJoin: 'round'
+                            }).addTo(routeLayerGroup);
+
+                            map.fitBounds(L.polyline(route, { weight: 1 }).getBounds());
+
+                            let i = 1;
+                            const step = () => {
+                                if (i >= route.length) {
+                                    renderRoute(route);
+                                    return;
+                                }
+                                animatedLine.addLatLng(route[i]);
+                                i += 1;
+                                animationTimer = setTimeout(step, 100);
+                            };
+                            step();
+                        }
+
+                        document.getElementById('animate-route-btn').onclick = function() {
+                            if (!lastRoute || lastRoute.length < 2) {
+                                return;
+                            }
+                            animateRoute(lastRoute);
+                        };
                 .catch(err => {
                     hideSpinner();
                     if (err) console.error(err);
