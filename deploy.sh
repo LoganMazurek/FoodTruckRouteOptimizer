@@ -32,7 +32,14 @@ if [ ! -d "/home/ubuntu/FoodTruckRouteOptimizer" ]; then
     git clone https://github.com/LoganMazurek/FoodTruckRouteOptimizer.git
 else
     cd /home/ubuntu/FoodTruckRouteOptimizer
+    # Stop Flask before updating to ensure clean state
+    sudo supervisorctl stop flask || true
+    # Stash any local changes and pull latest
+    git stash
     git pull origin main
+    # Clean Python cache
+    find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+    find . -type f -name "*.pyc" -delete 2>/dev/null || true
 fi
 
 cd /home/ubuntu/FoodTruckRouteOptimizer
