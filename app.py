@@ -72,6 +72,54 @@ def get_safe_file_path(boundary_id, filename_template):
     return file_path
 
 
+def load_deleted_nodes(boundary_id):
+    """Load previously deleted node IDs for a boundary."""
+    try:
+        deleted_nodes_path = get_safe_file_path(boundary_id, "{}_deleted_nodes.pkl")
+    except ValueError:
+        return set()
+
+    if not os.path.exists(deleted_nodes_path):
+        return set()
+
+    with open(deleted_nodes_path, "rb") as f:
+        deleted_nodes = pickle.load(f)
+
+    return set(deleted_nodes)
+
+
+def save_deleted_nodes(boundary_id, deleted_nodes):
+    """Persist deleted node IDs for a boundary."""
+    deleted_nodes_path = get_safe_file_path(boundary_id, "{}_deleted_nodes.pkl")
+    with open(deleted_nodes_path, "wb") as f:
+        pickle.dump(sorted(set(deleted_nodes)), f)
+
+
+def apply_deleted_nodes_to_graph(graph, nodes_to_delete):
+    """Apply node deletions with stitching logic, then keep the largest connected component."""
+    for node in nodes_to_delete:
+        if node not in graph:
+            continue
+
+        neighbors = list(graph.neighbors(node))
+        if len(neighbors) == 2 and not graph.has_edge(neighbors[0], neighbors[1]):
+            weight1 = graph.edges[node, neighbors[0]].get('weight', 1)
+            weight2 = graph.edges[node, neighbors[1]].get('weight', 1)
+            total_weight = weight1 + weight2
+            graph.add_edge(neighbors[0], neighbors[1], weight=total_weight)
+
+        graph.remove_node(node)
+
+    if graph.number_of_nodes() > 0 and not nx.is_connected(graph):
+        components = list(nx.connected_components(graph))
+        if components:
+            largest_component = max(components, key=len)
+            nodes_to_remove = set(graph.nodes()) - set(largest_component)
+            graph.remove_nodes_from(nodes_to_remove)
+
+    return graph
+
+
 @app.route("/", methods=["GET", "POST"])
 def home():
     if request.method == "POST":
@@ -218,6 +266,9 @@ def result():
         'min_street_length': min_street_length,
         'speed_priority': speed_priority,
     })
+    deleted_nodes = load_deleted_nodes(boundary_id)
+    if deleted_nodes:
+        graph = apply_deleted_nodes_to_graph(graph, deleted_nodes)
     graph = clean_up_graph(graph)
 
     if start_node not in graph:
@@ -365,26 +416,11 @@ def delete_nodes():
     with open(graph_file_path, "rb") as graph_file:
         G = pickle.load(graph_file)
 
-    for node in nodes_to_delete:
-        if node not in G:
-            continue
-        neighbors = list(G.neighbors(node))
-        if len(neighbors) == 2:
-            # Add edge between the two neighbors if it doesn't already exist
-            if not G.has_edge(neighbors[0], neighbors[1]):
-                # Optionally, sum the weights/distances of the two edges being replaced
-                weight1 = G.edges[node, neighbors[0]].get('weight', 1)
-                weight2 = G.edges[node, neighbors[1]].get('weight', 1)
-                total_weight = weight1 + weight2
-                G.add_edge(neighbors[0], neighbors[1], weight=total_weight)
-        G.remove_node(node)
+    G = apply_deleted_nodes_to_graph(G, nodes_to_delete)
 
-    if G.number_of_nodes() > 0 and not nx.is_connected(G):
-        components = list(nx.connected_components(G))
-        if components:
-            largest_component = max(components, key=len)
-            nodes_to_remove = set(G.nodes()) - set(largest_component)
-            G.remove_nodes_from(nodes_to_remove)
+    deleted_nodes = load_deleted_nodes(boundary_id)
+    deleted_nodes.update(nodes_to_delete)
+    save_deleted_nodes(boundary_id, deleted_nodes)
 
     # Save updated graph
     with open(graph_file_path, "wb") as graph_file:
@@ -459,6 +495,9 @@ def visualize_cpp():
     logger.info(f"[VISUALIZE_CPP] Original data: {len(nodes)} nodes, {len(ways)} ways")
     
     graph = simplify_graph(nodes, ways, settings=settings)
+    deleted_nodes = load_deleted_nodes(boundary_id)
+    if deleted_nodes:
+        graph = apply_deleted_nodes_to_graph(graph, deleted_nodes)
     logger.info(f"[VISUALIZE_CPP] Graph after simplify_graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
     
     graph = clean_up_graph(graph)
