@@ -607,7 +607,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     elif speed_priority == 'balanced':
         max_iterations = len(total_edges) * 4
     else:  # thorough
-        max_iterations = len(total_edges) * 10
+        max_iterations = len(total_edges) * 50
     
     iteration = 0
     reached_end_node = False
@@ -730,7 +730,11 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         
         # Early exit if coverage good enough and at end node (or no end node specified)
         coverage_pct = len(used_edges) / len(total_edges)
-        min_iterations_required = max(50, int(len(total_edges) * 0.3))  # At least 30% of edges or 50 iterations
+        if speed_priority == 'thorough':
+            min_iterations_required = max(10, int(len(total_edges) * 0.1))  # Much lower requirement for thorough
+        else:
+            min_iterations_required = max(50, int(len(total_edges) * 0.3))
+        
         if coverage_pct >= COVERAGE_THRESHOLD and iteration > min_iterations_required:
             if end_node is None or current_node == end_node:
                 break
