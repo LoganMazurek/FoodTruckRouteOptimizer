@@ -197,19 +197,33 @@ def result():
     
     # Get route settings
     coverage_mode = request.args.get("coverage_mode", "balanced")
-    min_street_length = int(request.args.get("min_street_length", 50))
+    min_street_length = int(request.args.get("min_street_length", 70))
     speed_priority = request.args.get("speed_priority", "balanced")
     
     try:
-        graph_file_path = get_safe_file_path(boundary_id, "{}_graph.pkl")
+        nodes_ways_file_path = get_safe_file_path(boundary_id, "{}_nodes_ways.pkl")
     except ValueError:
         return "Invalid graph path", 400
     
-    if not os.path.exists(graph_file_path):
-        return "Graph not found", 404
-    with open(graph_file_path, "rb") as graph_file:
+    if not os.path.exists(nodes_ways_file_path):
+        return "Graph data not found", 404
+    with open(nodes_ways_file_path, "rb") as data_file:
         import pickle
-        graph = pickle.load(graph_file)
+        data = pickle.load(data_file)
+        nodes = data["nodes"]
+        ways = data["ways"]
+
+    graph = simplify_graph(nodes, ways, settings={
+        'coverage_mode': coverage_mode,
+        'min_street_length': min_street_length,
+        'speed_priority': speed_priority,
+    })
+    graph = clean_up_graph(graph)
+
+    if start_node not in graph:
+        return "Selected start node is not available with current route settings. Please reselect a start node.", 400
+    if end_node and end_node not in graph:
+        return "Selected end node is not available with current route settings. Please reselect an end node.", 400
     
     print("Graph node IDs:", list(graph.nodes))
     print("Optimizing route...")
@@ -412,7 +426,7 @@ def visualize_cpp():
     
     # Get route settings
     coverage_mode = request.args.get("coverage_mode", "balanced")
-    min_street_length = int(request.args.get("min_street_length", 50))
+    min_street_length = int(request.args.get("min_street_length", 70))
     speed_priority = request.args.get("speed_priority", "balanced")
     
     if not boundary_id:
@@ -449,6 +463,11 @@ def visualize_cpp():
     
     graph = clean_up_graph(graph)
     logger.info(f"[VISUALIZE_CPP] Graph after clean_up_graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
+
+    if start_node not in graph:
+        return jsonify({"error": "Selected start node is not available with current route settings. Please reselect a start node."}), 400
+    if end_node and end_node not in graph:
+        return jsonify({"error": "Selected end node is not available with current route settings. Please reselect an end node."}), 400
     
     # Use the max coverage optimized algorithm with end_node support and settings
     route = find_route_max_coverage_optimized(graph, start_node, end_node, settings=settings)

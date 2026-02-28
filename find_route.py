@@ -466,13 +466,17 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         end_node: Optional ending node
         forbid_uturns: Whether to penalize U-turns
         settings: Optional dict with:
-            - speed_priority: 'fastest' (80% threshold), 'balanced' (80% threshold), 'thorough' (95% threshold)
+            - speed_priority: 'fastest', 'balanced', or 'thorough'
     """
     settings = settings or {}
     speed_priority = settings.get('speed_priority', 'balanced')
     
     import time
     G = graph.copy()
+
+    if start_node not in G:
+        logger.warning(f"[FIND_ROUTE] Start node {start_node} not present in graph")
+        return []
     
     intersections = {n for n in G.nodes if G.degree(n) >= 3}
     
@@ -482,18 +486,61 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     current_node = start_node
     prev = None
     total_edges = set(frozenset(e) for e in G.edges)
-    MAX_EDGE_REUSE = 2
-    
-    # Adjust coverage threshold based on speed_priority
-    if speed_priority == 'fastest':
-        COVERAGE_THRESHOLD = 0.75  # Exit earlier for faster completion
-        logger.debug(f"[FIND_ROUTE] Speed priority=fastest: using {COVERAGE_THRESHOLD*100:.0f}% coverage threshold")
-    elif speed_priority == 'thorough':
-        COVERAGE_THRESHOLD = 0.95  # Try to cover as much as possible
-        logger.debug(f"[FIND_ROUTE] Speed priority=thorough: using {COVERAGE_THRESHOLD*100:.0f}% coverage threshold")
-    else:  # balanced
-        COVERAGE_THRESHOLD = 0.80  # Standard balanced approach
-        logger.debug(f"[FIND_ROUTE] Speed priority=balanced: using {COVERAGE_THRESHOLD*100:.0f}% coverage threshold")
+
+    if not total_edges:
+        return [(G.nodes[start_node]['coordinates'][0], G.nodes[start_node]['coordinates'][1])]
+
+    # Distinct route profiles so each option has a clear, visible impact.
+    # Lower score is better.
+    speed_profiles = {
+        'fastest': {
+            'coverage_threshold': 0.65,
+            'max_edge_reuse': 1,
+            'reuse_penalty': 45.0,
+            'used_edge_penalty': 20.0,
+            'unused_bonus': 5.0,
+            'frontier_bonus': 4.0,
+            'backtrack_penalty': 40.0,
+            'uturn_penalty': 12.0,
+            'edge_length_weight': 0.09,
+            'end_pull_start': 0.55,
+            'end_pull_weight': 0.05,
+        },
+        'balanced': {
+            'coverage_threshold': 0.88,
+            'max_edge_reuse': 2,
+            'reuse_penalty': 60.0,
+            'used_edge_penalty': 28.0,
+            'unused_bonus': 22.0,
+            'frontier_bonus': 16.0,
+            'backtrack_penalty': 65.0,
+            'uturn_penalty': 28.0,
+            'edge_length_weight': 0.06,
+            'end_pull_start': 0.78,
+            'end_pull_weight': 0.015,
+        },
+        'thorough': {
+            'coverage_threshold': 0.97,
+            'max_edge_reuse': 3,
+            'reuse_penalty': 70.0,
+            'used_edge_penalty': 35.0,
+            'unused_bonus': 38.0,
+            'frontier_bonus': 32.0,
+            'backtrack_penalty': 75.0,
+            'uturn_penalty': 35.0,
+            'edge_length_weight': 0.03,
+            'end_pull_start': 0.92,
+            'end_pull_weight': 0.008,
+        },
+    }
+    profile = speed_profiles.get(speed_priority, speed_profiles['balanced'])
+
+    COVERAGE_THRESHOLD = profile['coverage_threshold']
+    MAX_EDGE_REUSE = profile['max_edge_reuse']
+    logger.debug(
+        f"[FIND_ROUTE] Speed priority={speed_priority}: "
+        f"coverage_target={COVERAGE_THRESHOLD*100:.0f}%, max_reuse={MAX_EDGE_REUSE}"
+    )
     
     start_time = time.time()
     
@@ -517,7 +564,8 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
                 break
         
         best_candidate = None
-        best_priority = (False, 999999, False, 999999, 999999)  # (is_forced_uturn, reuse, not_unused, distance_to_end, edge_len)
+        best_score = float('inf')
+        best_tiebreaker = float('inf')
         
         for n in neighbors:
             edge = frozenset([current_node, n])
@@ -554,24 +602,42 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
                     if current_node in intersections:
                         is_forced_uturn = True  # Penalize but don't forbid
             
-            # Priority: prefer unused edges, then lower reuse, then prefer non-U-turns, 
-            # then closer to end (if specified), then shorter edges
             coverage_pct = len(used_edges) / len(total_edges)
-            
-            # If we have good coverage and end_node is set, prioritize getting to end
-            if end_node and coverage_pct >= COVERAGE_THRESHOLD * 0.9:
-                priority = (is_forced_uturn, reuse_count, not is_unused, distance_to_end, edge_length)
+
+            unused_edges_from_neighbor = sum(
+                1
+                for nn in G.neighbors(n)
+                if frozenset([n, nn]) not in used_edges
+            )
+            frontier_ratio = unused_edges_from_neighbor / max(1, G.degree(n))
+
+            is_immediate_backtrack = prev is not None and n == prev
+
+            score = 0.0
+            score += reuse_count * profile['reuse_penalty']
+            score += edge_length * profile['edge_length_weight']
+            score -= frontier_ratio * profile['frontier_bonus']
+
+            if is_unused:
+                score -= profile['unused_bonus']
             else:
-                # Otherwise prioritize coverage (but consider speed_priority)
-                if speed_priority == 'fastest':
-                    # For fastest: weight toward shorter edges even if not unused
-                    priority = (is_forced_uturn, reuse_count, not is_unused, edge_length, distance_to_end)
-                else:
-                    # For balanced/thorough: standard priority
-                    priority = (is_forced_uturn, reuse_count, not is_unused, edge_length, distance_to_end)
-            
-            if best_candidate is None or priority < best_priority:
-                best_priority = priority
+                score += profile['used_edge_penalty']
+
+            if is_immediate_backtrack:
+                score += profile['backtrack_penalty']
+
+            if is_uturn and is_forced_uturn:
+                score += profile['uturn_penalty']
+
+            if end_node and coverage_pct >= COVERAGE_THRESHOLD * profile['end_pull_start']:
+                score += distance_to_end * profile['end_pull_weight']
+
+            tiebreaker = edge_length
+            if best_candidate is None or score < best_score or (
+                math.isclose(score, best_score) and tiebreaker < best_tiebreaker
+            ):
+                best_score = score
+                best_tiebreaker = tiebreaker
                 best_candidate = n
         
         if best_candidate is None:
