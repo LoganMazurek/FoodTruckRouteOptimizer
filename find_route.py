@@ -572,16 +572,16 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         },
         'thorough': {
             'coverage_threshold': 0.92,
-            'max_edge_reuse': 5,
-            'reuse_penalty': 20.0,
-            'used_edge_penalty': 10.0,
-            'unused_bonus': 150.0,
-            'frontier_bonus': 120.0,
-            'backtrack_penalty': 8.0,
-            'uturn_penalty': 3.0,
+            'max_edge_reuse': 6,
+            'reuse_penalty': 12.0,
+            'used_edge_penalty': 6.0,
+            'unused_bonus': 200.0,
+            'frontier_bonus': 160.0,
+            'backtrack_penalty': 4.0,
+            'uturn_penalty': 1.0,
             'edge_length_weight': 0.0,
-            'end_pull_start': 0.98,
-            'end_pull_weight': 0.0001,
+            'end_pull_start': 0.99,
+            'end_pull_weight': 0.00001,
         },
     }
     profile = speed_profiles.get(speed_priority, speed_profiles['balanced'])
@@ -607,7 +607,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     elif speed_priority == 'balanced':
         max_iterations = len(total_edges) * 4
     else:  # thorough
-        max_iterations = len(total_edges) * 15
+        max_iterations = len(total_edges) * 25
     
     iteration = 0
     reached_end_node = False
@@ -731,9 +731,11 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         # Early exit if coverage good enough and at end node (or no end node specified)
         coverage_pct = len(used_edges) / len(total_edges)
         if speed_priority == 'thorough':
-            min_iterations_required = max(10, int(len(total_edges) * 0.1))  # Much lower requirement for thorough
-        else:
+            min_iterations_required = 5  # Very minimal for thorough - let it explore
+        elif speed_priority == 'fastest':
             min_iterations_required = max(50, int(len(total_edges) * 0.3))
+        else:  # balanced
+            min_iterations_required = max(50, int(len(total_edges) * 0.25))
         
         if coverage_pct >= COVERAGE_THRESHOLD and iteration > min_iterations_required:
             if end_node is None or current_node == end_node:
