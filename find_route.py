@@ -148,7 +148,26 @@ def simplify_graph(nodes, ways, settings=None):
     filtered_by_length = 0
     kept_ways = 0
 
-    for way in ways:
+    # Pre-compute segment lengths and aggregated street lengths.
+    # IMPORTANT: OSM roads are often split into multiple way segments.
+    # We filter by full aggregated street length (name + highway), not segment length.
+    way_segment_lengths = {}
+    street_total_lengths = defaultdict(float)
+
+    for idx, way in enumerate(ways):
+        node_list = way.get("nodes", [])
+        segment_length = 0
+        for i in range(1, len(node_list)):
+            coord1 = nodes[node_list[i - 1]]
+            coord2 = nodes[node_list[i]]
+            segment_length += geodesic(coord1, coord2).meters
+
+        way_segment_lengths[idx] = segment_length
+        street_key = (way.get("name"), way.get("highway", "unclassified"))
+        if street_key[0]:
+            street_total_lengths[street_key] += segment_length
+
+    for idx, way in enumerate(ways):
         way_id = way.get("name")
         node_list = way.get("nodes", [])
 
@@ -158,14 +177,10 @@ def simplify_graph(nodes, ways, settings=None):
             filtered_by_type += 1
             continue
         
-        # Calculate total length of the way
-        total_length = 0
-        for i in range(1, len(node_list)):
-            coord1 = nodes[node_list[i-1]]
-            coord2 = nodes[node_list[i]]
-            total_length += geodesic(coord1, coord2).meters
+        street_key = (way_id, highway)
+        effective_street_length = street_total_lengths.get(street_key, way_segment_lengths.get(idx, 0))
 
-        if total_length < min_length:
+        if effective_street_length < min_length:
             filtered_by_length += 1
             continue  # Skip streets shorter than threshold
         
@@ -198,7 +213,7 @@ def simplify_graph(nodes, ways, settings=None):
     ways_filtered_by_length_in_graph = 0
 
     # Loop through each way and build the graph
-    for way in ways:
+    for idx, way in enumerate(ways):
         way_id = way.get("name")
         node_list = way.get("nodes", [])
 
@@ -208,13 +223,11 @@ def simplify_graph(nodes, ways, settings=None):
             ways_filtered_by_type_in_graph += 1
             continue
         
-        # CRITICAL: Also check street length here to prevent short streets from being added
-        total_way_length = 0
-        for idx in range(1, len(node_list)):
-            coord1 = nodes[node_list[idx-1]]
-            coord2 = nodes[node_list[idx]]
-            total_way_length += geodesic(coord1, coord2).meters
-        
+        # Use aggregated street length (across all same-name segments),
+        # not this single segment length.
+        street_key = (way_id, highway)
+        total_way_length = street_total_lengths.get(street_key, way_segment_lengths.get(idx, 0))
+
         if total_way_length < min_length:
             ways_filtered_by_length_in_graph += 1
             continue  # Skip streets shorter than threshold
@@ -532,17 +545,17 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     # Lower score is better.
     speed_profiles = {
         'fastest': {
-            'coverage_threshold': 0.65,
+            'coverage_threshold': 0.92,
             'max_edge_reuse': 1,
-            'reuse_penalty': 45.0,
-            'used_edge_penalty': 20.0,
-            'unused_bonus': 5.0,
-            'frontier_bonus': 4.0,
-            'backtrack_penalty': 40.0,
-            'uturn_penalty': 12.0,
-            'edge_length_weight': 0.09,
-            'end_pull_start': 0.55,
-            'end_pull_weight': 0.05,
+            'reuse_penalty': 50.0,
+            'used_edge_penalty': 25.0,
+            'unused_bonus': 35.0,
+            'frontier_bonus': 20.0,
+            'backtrack_penalty': 45.0,
+            'uturn_penalty': 15.0,
+            'edge_length_weight': 0.035,
+            'end_pull_start': 0.70,
+            'end_pull_weight': 0.03,
         },
         'balanced': {
             'coverage_threshold': 0.88,
@@ -558,17 +571,17 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
             'end_pull_weight': 0.015,
         },
         'thorough': {
-            'coverage_threshold': 0.97,
-            'max_edge_reuse': 3,
-            'reuse_penalty': 70.0,
-            'used_edge_penalty': 35.0,
-            'unused_bonus': 38.0,
-            'frontier_bonus': 32.0,
-            'backtrack_penalty': 75.0,
-            'uturn_penalty': 35.0,
-            'edge_length_weight': 0.03,
-            'end_pull_start': 0.92,
-            'end_pull_weight': 0.008,
+            'coverage_threshold': 0.995,
+            'max_edge_reuse': 4,
+            'reuse_penalty': 50.0,
+            'used_edge_penalty': 20.0,
+            'unused_bonus': 55.0,
+            'frontier_bonus': 40.0,
+            'backtrack_penalty': 35.0,
+            'uturn_penalty': 20.0,
+            'edge_length_weight': 0.0,
+            'end_pull_start': 1.0,
+            'end_pull_weight': 0.0,
         },
     }
     profile = speed_profiles.get(speed_priority, speed_profiles['balanced'])

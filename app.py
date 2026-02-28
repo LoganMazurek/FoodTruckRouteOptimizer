@@ -292,7 +292,7 @@ def result():
     speed_priorities = [
         ('fastest', 'Quick Route', 70),
         ('balanced', 'Balanced Route', 100),
-        ('thorough', 'Thorough Route', 70)
+        ('thorough', 'Thorough Route', 0)
     ]
     
     for priority, name, min_length_for_route in speed_priorities:
@@ -380,15 +380,34 @@ def result():
             if baseline_total_edge_length_m > 0
             else 0
         )
-        description = f"{coverage_percent}% street coverage"
+        
+        # Calculate estimated duration in minutes (assuming 30 km/h average speed)
+        total_duration_min = (total_distance_m / 1000) / 30 * 60
+        
+        # Calculate coverage per minute metric
+        coverage_per_minute = (
+            round((covered_edge_length_m / 1000) / total_duration_min, 2)
+            if total_duration_min > 0
+            else 0
+        )
+        
+        # Build description based on route priority
+        if priority == 'fastest':
+            description = f"{coverage_per_minute} km/min coverage"
+        else:
+            description = f"{coverage_percent}% street coverage"
+        
         if min_length_for_route >= 100:
             description += f" (roads ≥{min_length_for_route}m)"
+        elif min_length_for_route <= 0:
+            description += " (all road lengths)"
         
         route_info = {
             'total_distance_km': round(total_distance_m / 1000, 2),
             'total_distance_miles': round(total_distance_m / 1000 * 0.621371, 2),
-            'total_duration_min': round((total_distance_m / 1000) / 30 * 60, 2),
-            'coverage_percent': coverage_percent
+            'total_duration_min': round(total_duration_min, 2),
+            'coverage_percent': coverage_percent,
+            'coverage_per_minute': coverage_per_minute
         }
         
         route_variants.append({
@@ -401,11 +420,18 @@ def result():
             'route_info': route_info
         })
         
-        logger.info(
-            f"[RESULT] {name}: {route_info['total_distance_miles']} miles, "
-            f"{route_info['total_duration_min']:.0f} min, {len(pruned_route)} waypoints, "
-            f"{coverage_percent}% coverage ({covered_edge_length_m:.1f}m / {baseline_total_edge_length_m:.1f}m)"
-        )
+        if priority == 'fastest':
+            logger.info(
+                f"[RESULT] {name}: {route_info['total_distance_miles']} miles, "
+                f"{route_info['total_duration_min']:.0f} min, {len(pruned_route)} waypoints, "
+                f"{coverage_per_minute:.2f} km/min coverage, {coverage_percent}% street coverage"
+            )
+        else:
+            logger.info(
+                f"[RESULT] {name}: {route_info['total_distance_miles']} miles, "
+                f"{route_info['total_duration_min']:.0f} min, {len(pruned_route)} waypoints, "
+                f"{coverage_percent}% coverage ({covered_edge_length_m:.1f}m / {baseline_total_edge_length_m:.1f}m)"
+            )
     
     if not route_variants:
         return "No valid routes found", 400
