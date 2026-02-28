@@ -601,7 +601,14 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     start_time = time.time()
     
     # Greedy traversal with U-turn penalty
-    max_iterations = len(total_edges) * 3
+    # Increase iteration budget for more thorough exploration
+    if speed_priority == 'fastest':
+        max_iterations = len(total_edges) * 2
+    elif speed_priority == 'balanced':
+        max_iterations = len(total_edges) * 4
+    else:  # thorough
+        max_iterations = len(total_edges) * 10
+    
     iteration = 0
     reached_end_node = False
     
