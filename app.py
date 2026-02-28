@@ -279,23 +279,42 @@ def result():
     
     logger.info(f"[RESULT] Generating 3 route variants with coverage_mode={coverage_mode}, min_street_length={min_street_length}m")
     
+    # Calculate total edges available for coverage calculation
+    total_edges_in_graph = graph.number_of_edges()
+    
     # Generate 3 different route variants with distinct characteristics
     route_variants = []
     speed_priorities = [
-        ('fastest', 'Quick Route', 'Fastest completion with ~65% street coverage'),
-        ('balanced', 'Balanced Route', 'Good balance of speed and coverage (~88%)'),
-        ('thorough', 'Thorough Route', 'Maximum street coverage (~97%)')
+        ('fastest', 'Quick Route', 70),
+        ('balanced', 'Balanced Route', 200),  # Skip roads under 200m
+        ('thorough', 'Thorough Route', 70)
     ]
     
-    for priority, name, description in speed_priorities:
+    for priority, name, min_length_for_route in speed_priorities:
+        # Build graph with route-specific min_street_length
+        route_graph = simplify_graph(nodes, ways, settings={
+            'coverage_mode': coverage_mode,
+            'min_street_length': min_length_for_route,
+        })
+        if deleted_nodes:
+            route_graph = apply_deleted_nodes_to_graph(route_graph, deleted_nodes)
+        route_graph = clean_up_graph(route_graph)
+        
+        if start_node not in route_graph:
+            logger.warning(f"[RESULT] Start node not in {name} graph, skipping")
+            continue
+        if end_node and end_node not in route_graph:
+            logger.warning(f"[RESULT] End node not in {name} graph, skipping")
+            continue
+        
         settings_for_route = {
             'coverage_mode': coverage_mode,
-            'min_street_length': min_street_length,
+            'min_street_length': min_length_for_route,
             'speed_priority': priority
         }
         
-        logger.info(f"[RESULT] Generating {name} with speed_priority={priority}")
-        optimized_route = find_route_max_coverage_optimized(graph, start_node, end_node, settings=settings_for_route)
+        logger.info(f"[RESULT] Generating {name} with speed_priority={priority}, min_street_length={min_length_for_route}m")
+        optimized_route = find_route_max_coverage_optimized(route_graph, start_node, end_node, settings=settings_for_route)
         
         def is_latlon_tuple(x):
             return isinstance(x, (list, tuple)) and len(x) == 2 and all(isinstance(i, (float, int)) for i in x)
@@ -306,15 +325,17 @@ def result():
         
         # Prune route
         way_ids = [None] * len(optimized_route)
-        pruned_route = prune_common_sense_nodes(optimized_route, way_ids=way_ids, angle_threshold=30, graph=graph)
+        pruned_route = prune_common_sense_nodes(optimized_route, way_ids=way_ids, angle_threshold=30, graph=route_graph)
         
         if len(pruned_route) < 2:
             logger.warning(f"[RESULT] {name} too short after pruning")
             continue
         
-        # Calculate route statistics
+        # Calculate route statistics and track covered edges
         total_distance_m = 0
         turn_by_turn_instructions = []
+        covered_edges = set()
+        total_edges_in_route_graph = route_graph.number_of_edges()
         
         for i in range(len(optimized_route) - 1):
             curr_coord = optimized_route[i]
@@ -323,17 +344,21 @@ def result():
             # Find the graph edge
             curr_node = None
             next_node = None
-            for node, data in graph.nodes(data=True):
+            for node, data in route_graph.nodes(data=True):
                 if data.get('coordinates') == curr_coord:
                     curr_node = node
                 if data.get('coordinates') == next_coord:
                     next_node = node
             
-            if curr_node and next_node and graph.has_edge(curr_node, next_node):
-                edge_data = graph[curr_node][next_node]
+            if curr_node and next_node and route_graph.has_edge(curr_node, next_node):
+                edge_data = route_graph[curr_node][next_node]
                 distance = edge_data.get('distance', 0)
                 street_name = edge_data.get('way_id', 'unnamed road')
                 total_distance_m += distance
+                
+                # Track unique edge coverage (undirected edge)
+                edge_key = tuple(sorted([curr_node, next_node]))
+                covered_edges.add(edge_key)
                 
                 turn_by_turn_instructions.append({
                     'distance': distance,
@@ -342,10 +367,17 @@ def result():
                     'name': street_name
                 })
         
+        # Calculate actual coverage percentage
+        coverage_percent = round((len(covered_edges) / total_edges_in_route_graph * 100), 1) if total_edges_in_route_graph > 0 else 0
+        description = f"{coverage_percent}% street coverage"
+        if min_length_for_route >= 200:
+            description += f" (roads ≥{min_length_for_route}m)"
+        
         route_info = {
             'total_distance_km': round(total_distance_m / 1000, 2),
             'total_distance_miles': round(total_distance_m / 1000 * 0.621371, 2),
-            'total_duration_min': round((total_distance_m / 1000) / 30 * 60, 2)
+            'total_duration_min': round((total_distance_m / 1000) / 30 * 60, 2),
+            'coverage_percent': coverage_percent
         }
         
         route_variants.append({
@@ -358,7 +390,7 @@ def result():
             'route_info': route_info
         })
         
-        logger.info(f"[RESULT] {name}: {route_info['total_distance_miles']} miles, {route_info['total_duration_min']:.0f} min, {len(pruned_route)} waypoints")
+        logger.info(f"[RESULT] {name}: {route_info['total_distance_miles']} miles, {route_info['total_duration_min']:.0f} min, {len(pruned_route)} waypoints, {coverage_percent}% coverage ({len(covered_edges)}/{total_edges_in_route_graph} edges)")
     
     if not route_variants:
         return "No valid routes found", 400

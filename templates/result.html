@@ -413,7 +413,11 @@
                         <span class="stat-value">{{ variant.route_info.total_duration_min|round|int }} minutes</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">📍 Waypoints</span>
+                        <span class="stat-label">�️ Coverage</span>
+                        <span class="stat-value">{{ variant.route_info.coverage_percent }}%</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">�📍 Waypoints</span>
                         <span class="stat-value">{{ variant.waypoints|length }}</span>
                     </div>
                 </div>
@@ -464,7 +468,11 @@
                         <span class="stat-value">{{ variant.route_info.total_duration_min|round|int }} minutes</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">📍 Total Waypoints</span>
+                        <span class="stat-label">�️ Street Coverage</span>
+                        <span class="stat-value">{{ variant.route_info.coverage_percent }}%</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">�📍 Total Waypoints</span>
                         <span class="stat-value">{{ variant.waypoints|length }}</span>
                     </div>
                 </div>
