@@ -143,6 +143,10 @@ def simplify_graph(nodes, ways, settings=None):
         logger.debug(f"[SIMPLIFY_GRAPH] Coverage=balanced: excluded types = {excluded_types}")
     
     node_to_ways = {}
+    total_ways = len(ways)
+    filtered_by_type = 0
+    filtered_by_length = 0
+    kept_ways = 0
 
     for way in ways:
         way_id = way.get("name")
@@ -151,6 +155,7 @@ def simplify_graph(nodes, ways, settings=None):
         # Filter based on coverage mode
         highway = way.get("highway")
         if not way_id or highway in excluded_types:
+            filtered_by_type += 1
             continue
         
         # Calculate total length of the way
@@ -161,11 +166,14 @@ def simplify_graph(nodes, ways, settings=None):
             total_length += geodesic(coord1, coord2).meters
 
         if total_length < min_length:
+            filtered_by_length += 1
             continue  # Skip streets shorter than threshold
         
+        kept_ways += 1
         for node_id in node_list:
             node_to_ways.setdefault(node_id, set()).add(way_id)
 
+    logger.info(f"[SIMPLIFY_GRAPH] Way filtering: {total_ways} total, {filtered_by_type} by type, {filtered_by_length} by length (<{min_length}m), {kept_ways} kept")
     logger.debug(f"[SIMPLIFY_GRAPH] After filtering: {len(node_to_ways)} relevant nodes from {len(ways)} ways")
 
     # Intersections are nodes that belong to more than 1 way
@@ -185,6 +193,9 @@ def simplify_graph(nodes, ways, settings=None):
     important_nodes = intersections | end_nodes
 
     simplified_graph = nx.Graph()
+    edges_added = 0
+    ways_filtered_by_type_in_graph = 0
+    ways_filtered_by_length_in_graph = 0
 
     # Loop through each way and build the graph
     for way in ways:
@@ -194,7 +205,19 @@ def simplify_graph(nodes, ways, settings=None):
         # Apply same filtering for graph building
         highway = way.get("highway")
         if not way_id or highway in excluded_types:
+            ways_filtered_by_type_in_graph += 1
             continue
+        
+        # CRITICAL: Also check street length here to prevent short streets from being added
+        total_way_length = 0
+        for idx in range(1, len(node_list)):
+            coord1 = nodes[node_list[idx-1]]
+            coord2 = nodes[node_list[idx]]
+            total_way_length += geodesic(coord1, coord2).meters
+        
+        if total_way_length < min_length:
+            ways_filtered_by_length_in_graph += 1
+            continue  # Skip streets shorter than threshold
         
         i = 0
         
@@ -231,15 +254,30 @@ def simplify_graph(nodes, ways, settings=None):
                         node_list[j],
                         distance=total_distance,
                         weight=total_distance,
-                        way_id=way_id
+                        way_id=way_id,
+                        way_length=total_way_length  # Store full way length for debugging
                     )
+                    edges_added += 1
                     break
                 j += 1
             i = j
 
+    logger.info(f"[SIMPLIFY_GRAPH] Graph building: {ways_filtered_by_type_in_graph} ways filtered by type, {ways_filtered_by_length_in_graph} by length, {edges_added} edges added")
+
     # Retain only the largest connected component
     largest_cc = max(nx.connected_components(simplified_graph), key=len)
     simplified_graph = simplified_graph.subgraph(largest_cc).copy()
+
+    # Validate: check for any edges from streets shorter than min_length
+    edge_lengths = [data.get('way_length', 0) for u, v, data in simplified_graph.edges(data=True)]
+    if edge_lengths:
+        min_edge_way_length = min(edge_lengths)
+        max_edge_way_length = max(edge_lengths)
+        avg_edge_way_length = sum(edge_lengths) / len(edge_lengths)
+        logger.info(f"[SIMPLIFY_GRAPH] Edge way lengths: min={min_edge_way_length:.1f}m, max={max_edge_way_length:.1f}m, avg={avg_edge_way_length:.1f}m")
+        
+        if min_edge_way_length < min_length:
+            logger.warning(f"[SIMPLIFY_GRAPH] WARNING: Found edge from way shorter than {min_length}m threshold! Shortest: {min_edge_way_length:.1f}m")
 
     logger.info(f"[SIMPLIFY_GRAPH] Final graph: {simplified_graph.number_of_nodes()} nodes, {simplified_graph.number_of_edges()} edges")
     
