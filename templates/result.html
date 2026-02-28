@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Route for {{ neighborhood }}</title>
+    <title>Route Options</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -28,60 +28,263 @@
             font-weight: 700;
         }
 
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+        }
+
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 30px 20px;
         }
 
-        .card {
-            border: none;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-            margin-bottom: 25px;
-        }
-
-        .card-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            font-weight: 600;
-            border: none;
-            border-radius: 10px 10px 0 0;
-            padding: 15px;
-        }
-
-        h2 {
-            color: #333;
-            font-weight: 700;
-            margin-top: 30px;
-            margin-bottom: 15px;
-        }
-
-        .route-info {
+        .info-banner {
             background: linear-gradient(135deg, #e7f1ff 0%, #f0f7ff 100%);
             border-left: 4px solid #667eea;
             padding: 20px;
             border-radius: 8px;
-            margin-bottom: 25px;
+            margin-bottom: 30px;
+            text-align: center;
         }
 
-        .route-info p {
-            margin: 8px 0;
-            font-size: 1.1em;
-            color: #333;
-        }
-
-        .route-info strong {
+        .info-banner h2 {
             color: #667eea;
+            margin: 0 0 10px 0;
+            font-size: 1.3em;
         }
 
-        #route-map {
-            width: 100%;
-            height: 600px;
-            margin: 20px 0;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        .info-banner p {
+            color: #555;
+            margin: 0;
+        }
+
+        .route-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .route-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
             overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
+        }
+
+        .route-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .route-card-header {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .route-card-header h3 {
+            margin: 0 0 5px 0;
+            font-size: 1.4em;
+            font-weight: 700;
+        }
+
+        .route-card-header p {
+            margin: 0;
+            opacity: 0.9;
+            font-size: 0.95em;
+        }
+
+        .route-map-preview {
+            width: 100%;
+            height: 300px;
+            background: #e9ecef;
+        }
+
+        .route-stats {
+            padding: 20px;
+        }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .stat-row:last-child {
+            border-bottom: none;
+        }
+
+        .stat-label {
+            color: #666;
+            font-weight: 500;
+        }
+
+        .stat-value {
+            color: #333;
+            font-weight: 700;
+        }
+
+        .route-actions {
+            padding: 20px;
+            border-top: 2px solid #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn {
+            border-radius: 8px;
+            font-weight: 600;
+            padding: 12px 20px;
+            border: none;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+            cursor: pointer;
+        }
+
+        .btn-download {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+        }
+
+        .btn-download:hover {
+            background: linear-gradient(135deg, #20c997 0%, #17a2b8 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn-details {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-details:hover {
+            background: linear-gradient(135deg, #5568d3 0%, #65399b 100%);
+            transform: translateY(-2px);
+        }
+
+        .bottom-actions {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 30px;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+            color: white;
+        }
+
+        .boundary-link {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            height: 38px;
+            padding: 0 12px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            color: white;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            box-shadow: 0 8px 18px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s, background-color 0.2s;
+            z-index: 9999;
+        }
+
+        .boundary-link:hover {
+            background: rgba(255, 255, 255, 0.35);
+            transform: translateY(-1px);
+        }
+
+        .tip-box {
+            background: #e7f1ff;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            color: #333;
+            margin-top: 20px;
+        }
+
+        /* Badge for route priority */
+        .priority-badge {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #667eea;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 700;
+            text-transform: uppercase;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        /* Detailed view modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 10000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            max-width: 1000px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px 12px 0 0;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+        }
+
+        .modal-body {
+            padding: 30px;
+        }
+
+        .large-map {
+            width: 100%;
+            height: 500px;
+            border-radius: 8px;
+            margin: 20px 0;
         }
 
         .instructions-container {
@@ -89,8 +292,8 @@
             border-radius: 10px;
             padding: 0;
             margin: 20px 0;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
             overflow: hidden;
+            border: 1px solid #e0e0e0;
         }
 
         .instructions-header {
@@ -165,39 +368,338 @@
             gap: 20px;
         }
 
-        .button-container {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            margin: 30px 0;
-            flex-wrap: wrap;
+        @media (max-width: 768px) {
+            .route-options {
+                grid-template-columns: 1fr;
+            }
+            .container {
+                padding: 15px 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <a href="/select_boundaries" class="boundary-link" title="Back to boundary selection">Boundaries</a>
+    
+    <div class="header">
+        <h1>🚚 Choose Your Route</h1>
+        <p>Compare options and select the best route for your needs</p>
+    </div>
+
+    <div class="container">
+        <div class="info-banner">
+            <h2>📊 3 Route Options Generated</h2>
+            <p>Each route offers a different balance of speed and coverage. Choose the one that fits your goals best.</p>
+        </div>
+
+        <div class="route-options">
+            {% for variant in route_variants %}
+            <div class="route-card">
+                <div class="priority-badge">{{ variant.priority }}</div>
+                <div class="route-card-header">
+                    <h3>{{ variant.name }}</h3>
+                    <p>{{ variant.description }}</p>
+                </div>
+                
+                <div class="route-map-preview" id="map-{{ loop.index }}"></div>
+                
+                <div class="route-stats">
+                    <div class="stat-row">
+                        <span class="stat-label">📏 Distance</span>
+                        <span class="stat-value">{{ variant.route_info.total_distance_miles }} miles</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">⏱️ Est. Time</span>
+                        <span class="stat-value">{{ variant.route_info.total_duration_min|round|int }} minutes</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">📍 Waypoints</span>
+                        <span class="stat-value">{{ variant.waypoints|length }}</span>
+                    </div>
+                </div>
+                
+                <div class="route-actions">
+                    <a href="/export_gpx?boundary_id={{ boundary_id }}&route_option={{ variant.priority }}" 
+                       class="btn btn-download">
+                        📱 Download GPX
+                    </a>
+                    <button class="btn btn-details" onclick="showDetails({{ loop.index0 }})">
+                        🔍 View Details
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="bottom-actions">
+            <button class="btn btn-secondary" onclick="window.location.href='/graph_leaflet?boundary_id={{ boundary_id }}'">
+                ← Back to Graph Editor
+            </button>
+            <button class="btn btn-secondary" onclick="window.location.href='/'">
+                ↻ Restart from Beginning
+            </button>
+        </div>
+
+        <div class="tip-box">
+            💡 <strong>Tip:</strong> Download any GPX file and import it into OsmAnd, Organic Maps, or Komoot for hands-free voice-guided navigation.
+        </div>
+    </div>
+
+    <!-- Detailed View Modals -->
+    {% for variant in route_variants %}
+    <div class="modal-overlay" id="modal-{{ loop.index0 }}">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>{{ variant.name }} - Detailed View</h3>
+                <p>{{ variant.description }}</p>
+            </div>
+            <div class="modal-body">
+                <div class="route-stats" style="margin-bottom: 20px;">
+                    <div class="stat-row">
+                        <span class="stat-label">📏 Total Distance</span>
+                        <span class="stat-value">{{ variant.route_info.total_distance_miles }} miles ({{ variant.route_info.total_distance_km }} km)</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">⏱️ Estimated Duration</span>
+                        <span class="stat-value">{{ variant.route_info.total_duration_min|round|int }} minutes</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">📍 Total Waypoints</span>
+                        <span class="stat-value">{{ variant.waypoints|length }}</span>
+                    </div>
+                </div>
+
+                <h4>📍 Full Route Map</h4>
+                <div class="large-map" id="large-map-{{ loop.index0 }}"></div>
+
+                {% if variant.instructions %}
+                <div class="instructions-container">
+                    <div class="instructions-header" onclick="toggleInstructions({{ loop.index0 }})">
+                        <span>📋 Turn-by-Turn Directions ({{ variant.instructions|length }} steps)</span>
+                        <span class="toggle-icon" id="toggle-icon-{{ loop.index0 }}">▼</span>
+                    </div>
+                    <div id="instructions-{{ loop.index0 }}" style="display: none;">
+                        {% for step in variant.instructions %}
+                        <div class="instruction-step">
+                            <div class="step-number">{{ loop.index }}</div>
+                            <div class="step-content">
+                                <div class="step-text">
+                                    {{ step.instruction }}
+                                    {% if step.name and step.name != '' %}
+                                    <strong>{{ step.name }}</strong>
+                                    {% endif %}
+                                </div>
+                                <div class="step-details">
+                                    <span>📏 {{ (step.distance / 1609.34)|round(2) }} mi</span>
+                                    <span>⏱️ {{ (step.duration / 60)|round(1) }} min</span>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div style="margin-top: 20px; display: flex; gap: 10px;">
+                    <a href="/export_gpx?boundary_id={{ boundary_id }}&route_option={{ variant.priority }}" 
+                       class="btn btn-download" style="flex: 1;">
+                        📱 Download GPX
+                    </a>
+                    <button class="btn btn-secondary" onclick="closeModal({{ loop.index0 }})" style="flex: 0 0 auto;">
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+
+    <script>
+        // Route data from backend
+        const routeVariants = {{ route_variants|tojson }};
+
+        // Initialize preview maps
+        routeVariants.forEach((variant, index) => {
+            const mapId = `map-${index + 1}`;
+            const map = L.map(mapId, {
+                zoomControl: false,
+                dragging: false,
+                scrollWheelZoom: false,
+                doubleClickZoom: false,
+                touchZoom: false
+            });
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap',
+                maxZoom: 19
+            }).addTo(map);
+            
+            const routeLine = L.polyline(variant.geometry, {
+                color: '#667eea',
+                weight: 4,
+                opacity: 0.8
+            }).addTo(map);
+            
+            // Add start marker
+            if (variant.waypoints.length > 0) {
+                const startIcon = L.divIcon({
+                    className: 'custom-marker',
+                    html: '<div style="background-color: #28a745; color: white; width: 24px; height: 24px; border-radius: 50%; border: 2px solid white; display: flex; align-items: center; justify-content: center; font-weight: bold; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">S</div>',
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                });
+                L.marker([variant.waypoints[0][0], variant.waypoints[0][1]], { icon: startIcon }).addTo(map);
+            }
+            
+            map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
+        });
+
+        // Show detailed modal
+        function showDetails(index) {
+            const modal = document.getElementById(`modal-${index}`);
+            modal.style.display = 'flex';
+            
+            // Initialize large map if not already done
+            const largeMapId = `large-map-${index}`;
+            const largeMapDiv = document.getElementById(largeMapId);
+            
+            if (!largeMapDiv._leaflet_id) {
+                const variant = routeVariants[index];
+                const largeMap = L.map(largeMapId);
+                
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19
+                }).addTo(largeMap);
+                
+                const routeLine = L.polyline(variant.geometry, {
+                    color: '#667eea',
+                    weight: 5,
+                    opacity: 0.8
+                }).addTo(largeMap);
+                
+                // Add markers
+                variant.waypoints.forEach((point, idx) => {
+                    if (idx === 0) {
+                        const startIcon = L.divIcon({
+                            className: 'custom-marker',
+                            html: '<div style="background-color: #28a745; color: white; width: 32px; height: 32px; border-radius: 50%; border: 3px solid white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.1em; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">S</div>',
+                            iconSize: [32, 32],
+                            iconAnchor: [16, 16]
+                        });
+                        L.marker([point[0], point[1]], { icon: startIcon })
+                            .bindPopup('<strong>Start Point</strong>')
+                            .addTo(largeMap);
+                    } else {
+                        const waypointIcon = L.divIcon({
+                            className: 'custom-marker',
+                            html: '<div style="background-color: #667eea; width: 8px; height: 8px; border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3);"></div>',
+                            iconSize: [8, 8],
+                            iconAnchor: [4, 4]
+                        });
+                        L.marker([point[0], point[1]], { icon: waypointIcon })
+                            .bindPopup(`<strong>Route Point ${idx}</strong>`)
+                            .addTo(largeMap);
+                    }
+                });
+                
+                largeMap.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
+            }
         }
 
-        .btn {
-            border-radius: 8px;
-            font-weight: 600;
-            padding: 12px 25px;
-            border: none;
-            transition: transform 0.2s, box-shadow 0.2s;
-            text-decoration: none;
+        // Close modal
+        function closeModal(index) {
+            document.getElementById(`modal-${index}`).style.display = 'none';
         }
 
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
+        // Toggle instructions
+        function toggleInstructions(index) {
+            const container = document.getElementById(`instructions-${index}`);
+            const icon = document.getElementById(`toggle-icon-${index}`);
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                icon.classList.add('open');
+            } else {
+                container.style.display = 'none';
+                icon.classList.remove('open');
+            }
         }
 
-        .btn-primary {
-            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-            color: white;
-        }
+        // Close modal on overlay click
+        document.querySelectorAll('.modal-overlay').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    this.style.display = 'none';
+                }
+            });
+        });
+    </script>
 
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #20c997 0%, #17a2b8 100%);
-            color: white;
-        }
+    <!-- Footer with Credits -->
+    <footer style="background: white; border-top: 1px solid #ddd; padding: 20px; text-align: center; margin-top: 30px; font-size: 0.85em; color: #666;">
+        <p style="margin: 5px 0;">
+            <a href="#" onclick="showCredits(event)" style="color: #667eea; text-decoration: none; cursor: pointer;">Credits & Attribution</a>
+        </p>
+        <p style="margin: 5px 0; font-size: 0.8em;">© 2026 Food Truck Route Optimizer | Built with open-source technologies</p>
+    </footer>
 
-        .boundary-link {
+    <!-- Credits Modal -->
+    <div id="creditsModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 10px; padding: 30px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
+            <h3 style="color: #333; margin-top: 0;">Credits & Attribution</h3>
+            <p style="color: #666; line-height: 1.6;">This project uses the following excellent open-source technologies and services:</p>
+            
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">🗺️ Mapping & Routing</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>Leaflet.js</strong> - Interactive maps library (BSD 2-Clause License)</li>
+                <li><strong>OpenStreetMap</strong> - Free map data and tiles (ODbL License)</li>
+                <li><strong>OSRM (Open Source Routing Machine)</strong> - Route optimization engine (AGPL-3.0 License)</li>
+                <li><strong>Nominatim</strong> - Free geocoding service (ODbL License)</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">🎨 UI & Frontend</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>Bootstrap 5</strong> - CSS framework (MIT License)</li>
+                <li><strong>D3.js</strong> - Data visualization library (ISC License)</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">🐍 Backend</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>Flask</strong> - Web framework (BSD License)</li>
+                <li><strong>NetworkX</strong> - Graph library (BSD License)</li>
+                <li><strong>GeoPy</strong> - Geolocation library (MIT License)</li>
+                <li><strong>Overpass API</strong> - OpenStreetMap data queries</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">📊 Data</h5>
+            <ul style="color: #666; margin-left: 20px; line-height: 1.8;">
+                <li><strong>OpenStreetMap Contributors</strong> - Street data (ODbL License)</li>
+                <li><strong>Humanitarian Data Exchange</strong> - OSM.pbf data</li>
+            </ul>
+
+            <h5 style="color: #667eea; margin-top: 20px; margin-bottom: 10px;">🙏 Special Thanks</h5>
+            <p style="color: #666; margin: 10px 0; line-height: 1.8;">
+                This application is built on the work of countless open-source contributors. We are grateful for their dedication and innovation.
+            </p>
+
+            <button onclick="closeCredits()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; margin-top: 20px; font-weight: 600;">Close</button>
+        </div>
+    </div>
+
+    <script>
+        function showCredits(event) {
+            event.preventDefault();
+            document.getElementById('creditsModal').style.display = 'flex';
+        }
+        function closeCredits() {
+            document.getElementById('creditsModal').style.display = 'none';
+        }
+        document.getElementById('creditsModal').addEventListener('click', function(e) {
+            if (e.target === this) closeCredits();
+        });
+    </script>
+</body>
+</html>
             position: fixed;
             top: 15px;
             right: 15px;

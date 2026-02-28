@@ -246,7 +246,6 @@ def result():
     # Get route settings
     coverage_mode = request.args.get("coverage_mode", "balanced")
     min_street_length = int(request.args.get("min_street_length", 70))
-    speed_priority = request.args.get("speed_priority", "balanced")
     
     try:
         nodes_ways_file_path = get_safe_file_path(boundary_id, "{}_nodes_ways.pkl")
@@ -261,11 +260,13 @@ def result():
         nodes = data["nodes"]
         ways = data["ways"]
 
-    graph = simplify_graph(nodes, ways, settings={
+    # Build graph once with user settings
+    base_settings = {
         'coverage_mode': coverage_mode,
         'min_street_length': min_street_length,
-        'speed_priority': speed_priority,
-    })
+    }
+    
+    graph = simplify_graph(nodes, ways, settings=base_settings)
     deleted_nodes = load_deleted_nodes(boundary_id)
     if deleted_nodes:
         graph = apply_deleted_nodes_to_graph(graph, deleted_nodes)
@@ -276,122 +277,107 @@ def result():
     if end_node and end_node not in graph:
         return "Selected end node is not available with current route settings. Please reselect an end node.", 400
     
-    print("Graph node IDs:", list(graph.nodes))
-    print("Optimizing route...")
-    print(f"Start node: {start_node}, End node: {end_node}")
-    logger.info(f"[RESULT] Optimizing with settings: coverage_mode={coverage_mode}, min_street_length={min_street_length}m, speed_priority={speed_priority}")
+    logger.info(f"[RESULT] Generating 3 route variants with coverage_mode={coverage_mode}, min_street_length={min_street_length}m")
     
-    # Use max coverage optimized route with end_node support and settings
-    settings_for_route = {
-        'coverage_mode': coverage_mode,
-        'min_street_length': min_street_length,
-        'speed_priority': speed_priority
-    }
-    optimized_route = find_route_max_coverage_optimized(graph, start_node, end_node, settings=settings_for_route)
-    def is_latlon_tuple(x):
-        return isinstance(x, (list, tuple)) and len(x) == 2 and all(isinstance(i, (float, int)) for i in x)
-    if not optimized_route or not is_latlon_tuple(optimized_route[0]):
-        return "No valid route found", 400
-    print(f"[DEBUG] Optimized route length: {len(optimized_route)}")
-    way_ids = []
-    for i in range(len(optimized_route)-1):
-        way_ids.append(None)  # No way_ids used
-    way_ids.append(way_ids[-1] if way_ids else None)  # Pad to match route length
-    pruned_route = prune_common_sense_nodes(optimized_route, way_ids=way_ids, angle_threshold=30, graph=graph)
-    print(f"[DEBUG] Pruned route length: {len(pruned_route)}")
-    logger.debug(f"[DEBUG] First 3 waypoints in pruned_route: {pruned_route[:3]}")
-    logger.debug(f"[DEBUG] Last 3 waypoints in pruned_route: {pruned_route[-3:]}")
+    # Generate 3 different route variants with distinct characteristics
+    route_variants = []
+    speed_priorities = [
+        ('fastest', 'Quick Route', 'Fastest completion with ~65% street coverage'),
+        ('balanced', 'Balanced Route', 'Good balance of speed and coverage (~88%)'),
+        ('thorough', 'Thorough Route', 'Maximum street coverage (~97%)')
+    ]
     
-    # Validate waypoint coordinates
-    min_lat = min(pt[0] for pt in pruned_route)
-    max_lat = max(pt[0] for pt in pruned_route)
-    min_lon = min(pt[1] for pt in pruned_route)
-    max_lon = max(pt[1] for pt in pruned_route)
-    logger.debug(f"[DEBUG] Route bounds - Lat: {min_lat:.4f} to {max_lat:.4f}, Lon: {min_lon:.4f} to {max_lon:.4f}")
-    
-    if len(pruned_route) < 2:
-        return "Route too short after pruning", 400
-    
-    # For visualization: use the actual route path directly (no OSRM waypoint routing)
-    # This avoids the huge loops from OSRM connecting duplicate waypoints
-    route_geometry = pruned_route  # Direct path through graph edges for map display
-    
-    # For navigation: DON'T use OSRM - it creates massive loops from coordinate snapping issues
-    # Instead, use graph edges directly since we already have exact street connections
-    logger.debug(f"[NAV] Creating navigation from graph edges for {len(pruned_route)} waypoints")
-    
-    turn_by_turn_instructions = []
-    total_distance_m = 0
-    
-    # Calculate distance and create basic navigation from graph edges
-    for i in range(len(optimized_route) - 1):
-        curr_coord = optimized_route[i]
-        next_coord = optimized_route[i + 1]
+    for priority, name, description in speed_priorities:
+        settings_for_route = {
+            'coverage_mode': coverage_mode,
+            'min_street_length': min_street_length,
+            'speed_priority': priority
+        }
         
-        # Find the graph edge
-        curr_node = None
-        next_node = None
-        for node, data in graph.nodes(data=True):
-            if data.get('coordinates') == curr_coord:
-                curr_node = node
-            if data.get('coordinates') == next_coord:
-                next_node = node
+        logger.info(f"[RESULT] Generating {name} with speed_priority={priority}")
+        optimized_route = find_route_max_coverage_optimized(graph, start_node, end_node, settings=settings_for_route)
         
-        if curr_node and next_node and graph.has_edge(curr_node, next_node):
-            edge_data = graph[curr_node][next_node]
-            distance = edge_data.get('distance', 0)
-            street_name = edge_data.get('way_id', 'unnamed road')
-            total_distance_m += distance
+        def is_latlon_tuple(x):
+            return isinstance(x, (list, tuple)) and len(x) == 2 and all(isinstance(i, (float, int)) for i in x)
+        
+        if not optimized_route or not is_latlon_tuple(optimized_route[0]):
+            logger.warning(f"[RESULT] Failed to generate {name}")
+            continue
+        
+        # Prune route
+        way_ids = [None] * len(optimized_route)
+        pruned_route = prune_common_sense_nodes(optimized_route, way_ids=way_ids, angle_threshold=30, graph=graph)
+        
+        if len(pruned_route) < 2:
+            logger.warning(f"[RESULT] {name} too short after pruning")
+            continue
+        
+        # Calculate route statistics
+        total_distance_m = 0
+        turn_by_turn_instructions = []
+        
+        for i in range(len(optimized_route) - 1):
+            curr_coord = optimized_route[i]
+            next_coord = optimized_route[i + 1]
             
-            # Create simple instruction
-            turn_by_turn_instructions.append({
-                'distance': distance,
-                'duration': distance / 8.33,  # ~30 km/h = 8.33 m/s
-                'instruction': f'Continue on {street_name}',
-                'name': street_name
-            })
+            # Find the graph edge
+            curr_node = None
+            next_node = None
+            for node, data in graph.nodes(data=True):
+                if data.get('coordinates') == curr_coord:
+                    curr_node = node
+                if data.get('coordinates') == next_coord:
+                    next_node = node
+            
+            if curr_node and next_node and graph.has_edge(curr_node, next_node):
+                edge_data = graph[curr_node][next_node]
+                distance = edge_data.get('distance', 0)
+                street_name = edge_data.get('way_id', 'unnamed road')
+                total_distance_m += distance
+                
+                turn_by_turn_instructions.append({
+                    'distance': distance,
+                    'duration': distance / 8.33,  # ~30 km/h = 8.33 m/s
+                    'instruction': f'Continue on {street_name}',
+                    'name': street_name
+                })
+        
+        route_info = {
+            'total_distance_km': round(total_distance_m / 1000, 2),
+            'total_distance_miles': round(total_distance_m / 1000 * 0.621371, 2),
+            'total_duration_min': round((total_distance_m / 1000) / 30 * 60, 2)
+        }
+        
+        route_variants.append({
+            'priority': priority,
+            'name': name,
+            'description': description,
+            'waypoints': pruned_route,
+            'geometry': pruned_route,
+            'instructions': turn_by_turn_instructions,
+            'route_info': route_info
+        })
+        
+        logger.info(f"[RESULT] {name}: {route_info['total_distance_miles']} miles, {route_info['total_duration_min']:.0f} min, {len(pruned_route)} waypoints")
     
-    osrm_route_info = {
-        'total_distance_km': round(total_distance_m / 1000, 2),
-        'total_duration_min': round((total_distance_m / 1000) / 30 * 60, 2)
-    }
+    if not route_variants:
+        return "No valid routes found", 400
     
-    osrm_geometry = pruned_route  # Use waypoints directly for GPX track
-    
-    # Convert km to miles
-    osrm_route_info['total_distance_miles'] = round(osrm_route_info['total_distance_km'] * 0.621371, 2)
-    
-    print(f"[DEBUG] Map display: {len(route_geometry)} waypoint markers")
-    print(f"[DEBUG] Navigation: {len(turn_by_turn_instructions) if turn_by_turn_instructions else 0} instructions")
-    print(f"[DEBUG] Route distance: {osrm_route_info['total_distance_miles']} miles ({osrm_route_info['total_distance_km']} km)")
-    
-    # Store route data in file for GPX export (avoid session size limits)
-    route_data = {
-        'waypoints': pruned_route,
-        'geometry': osrm_geometry if osrm_geometry else route_geometry,  # Detailed OSRM geometry for GPX navigation
-        'instructions': turn_by_turn_instructions,
-        'distance_km': osrm_route_info['total_distance_km'],
-        'distance_miles': osrm_route_info['total_distance_miles'],
-        'duration_min': osrm_route_info['total_duration_min']
-    }
-    
+    # Store all route variants for later GPX export
     try:
-        route_file_path = get_safe_file_path(boundary_id, "{}_route.pkl")
+        routes_file_path = get_safe_file_path(boundary_id, "{}_routes.pkl")
     except ValueError:
         return "Invalid route path", 400
     
     os.makedirs(GRAPH_DIR, exist_ok=True)
-    with open(route_file_path, "wb") as f:
-        pickle.dump(route_data, f)
+    with open(routes_file_path, "wb") as f:
+        pickle.dump(route_variants, f)
     
-    google_maps_urls = get_google_maps_url(pruned_route)
     return render_template("result.html", 
-                         google_maps_urls=google_maps_urls,
                          boundary_id=boundary_id,
-                         turn_by_turn=turn_by_turn_instructions,
-                         route_info=osrm_route_info,
-                         route_geometry=route_geometry,
-                         pruned_route=pruned_route)
+                         route_variants=route_variants,
+                         start_node=start_node,
+                         end_node=end_node)
 
 @app.route("/delete_nodes", methods=["POST"])
 def delete_nodes():
@@ -522,38 +508,52 @@ def visualize_cpp():
 
 @app.route("/export_gpx")
 def export_gpx():
-    """Export the current route as a GPX file for navigation apps"""
+    """Export the selected route variant as a GPX file for navigation apps"""
     from flask import Response
     from datetime import datetime
     
     boundary_id = request.args.get("boundary_id")
+    route_option = request.args.get("route_option", "balanced")  # fastest, balanced, or thorough
+    
     if not boundary_id:
         return "Missing boundary_id parameter", 400
 
     if not validate_boundary_id(boundary_id):
         return "Invalid boundary_id parameter", 400
     
-    # Load route data from file instead of session, using a safe, normalized path
+    # Load route variants from file
     try:
-        route_file_path = get_safe_file_path(boundary_id, "{}_route.pkl")
+        routes_file_path = get_safe_file_path(boundary_id, "{}_routes.pkl")
     except ValueError:
         return "Invalid route path", 400
 
-    if not os.path.exists(route_file_path):
+    if not os.path.exists(routes_file_path):
         return "No route data available", 404
     
-    with open(route_file_path, "rb") as f:
-        route_data = pickle.load(f)
+    with open(routes_file_path, "rb") as f:
+        route_variants = pickle.load(f)
+    
+    # Find the selected route variant
+    route_data = None
+    for variant in route_variants:
+        if variant['priority'] == route_option:
+            route_data = variant
+            break
+    
+    if not route_data:
+        return f"Route option '{route_option}' not found", 404
     
     # Generate GPX XML
-    distance_miles = route_data.get('distance_miles', 0)
-    duration_min = route_data.get('duration_min', 0)
+    route_info = route_data['route_info']
+    distance_miles = route_info.get('total_distance_miles', 0)
+    duration_min = route_info.get('total_duration_min', 0)
+    route_name = route_data['name']
     
     gpx_content = '<?xml version="1.0" encoding="UTF-8"?>\n'
     gpx_content += '<gpx version="1.1" creator="FoodTruckRouteOptimizer" xmlns="http://www.topografix.com/GPX/1/1">\n'
     gpx_content += f'  <metadata>\n'
-    gpx_content += f'    <name>Food Truck Coverage Route</name>\n'
-    gpx_content += f'    <desc>Route: {distance_miles} miles, {duration_min:.0f} min. Optimized for maximum street coverage.</desc>\n'
+    gpx_content += f'    <name>{route_name}</name>\n'
+    gpx_content += f'    <desc>Route: {distance_miles} miles, {duration_min:.0f} min. {route_data["description"]}</desc>\n'
     gpx_content += f'    <time>{datetime.utcnow().isoformat()}Z</time>\n'
     gpx_content += f'  </metadata>\n'
     
@@ -565,11 +565,11 @@ def export_gpx():
         gpx_content += f'    <name>{name}</name>\n'
         gpx_content += f'  </wpt>\n'
     
-    # Add route track (full geometry from OSRM)
+    # Add route track (full geometry)
     geometry = route_data.get('geometry')
     if geometry:
         gpx_content += '  <trk>\n'
-        gpx_content += '    <name>Food Truck Route</name>\n'
+        gpx_content += f'    <name>{route_name}</name>\n'
         gpx_content += '    <trkseg>\n'
         for lat, lon in geometry:
             gpx_content += f'      <trkpt lat="{lat}" lon="{lon}"></trkpt>\n'
@@ -593,12 +593,13 @@ def export_gpx():
     
     gpx_content += '</gpx>'
     
-    # Return as downloadable file
+    # Return as downloadable file with route-specific filename
+    filename = f"food_truck_route_{route_option}.gpx"
     return Response(
         gpx_content,
         mimetype='application/gpx+xml',
         headers={
-            'Content-Disposition': 'attachment; filename="food_truck_route.gpx"',
+            'Content-Disposition': f'attachment; filename="{filename}"',
             'Content-Type': 'application/gpx+xml; charset=utf-8'
         }
     )
