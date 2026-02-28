@@ -573,14 +573,14 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         'thorough': {
             'coverage_threshold': 0.92,
             'max_edge_reuse': 5,
-            'reuse_penalty': 15.0,
-            'used_edge_penalty': 8.0,
-            'unused_bonus': 200.0,
-            'frontier_bonus': 150.0,
-            'backtrack_penalty': 5.0,
-            'uturn_penalty': 2.0,
+            'reuse_penalty': 20.0,
+            'used_edge_penalty': 10.0,
+            'unused_bonus': 150.0,
+            'frontier_bonus': 120.0,
+            'backtrack_penalty': 8.0,
+            'uturn_penalty': 3.0,
             'edge_length_weight': 0.0,
-            'end_pull_start': 0.99,
+            'end_pull_start': 0.98,
             'end_pull_weight': 0.0001,
         },
     }
@@ -607,7 +607,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     elif speed_priority == 'balanced':
         max_iterations = len(total_edges) * 4
     else:  # thorough
-        max_iterations = len(total_edges) * 50
+        max_iterations = len(total_edges) * 15
     
     iteration = 0
     reached_end_node = False
