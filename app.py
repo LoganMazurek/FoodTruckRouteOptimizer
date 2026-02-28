@@ -384,16 +384,16 @@ def result():
         # Calculate estimated duration in minutes (assuming 30 km/h average speed)
         total_duration_min = (total_distance_m / 1000) / 30 * 60
         
-        # Calculate coverage per minute metric
+        # Calculate coverage per minute metric (in miles/min)
         coverage_per_minute = (
-            round((covered_edge_length_m / 1000) / total_duration_min, 2)
+            round((covered_edge_length_m / 1000 * 0.621371) / total_duration_min, 2)
             if total_duration_min > 0
             else 0
         )
         
         # Build description based on route priority
         if priority == 'fastest':
-            description = f"{coverage_per_minute} km/min coverage"
+            description = f"{coverage_per_minute} miles/min coverage"
         else:
             description = f"{coverage_percent}% street coverage"
         
