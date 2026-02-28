@@ -588,9 +588,14 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
 
     COVERAGE_THRESHOLD = profile['coverage_threshold']
     MAX_EDGE_REUSE = profile['max_edge_reuse']
-    logger.debug(
+    logger.info(
         f"[FIND_ROUTE] Speed priority={speed_priority}: "
-        f"coverage_target={COVERAGE_THRESHOLD*100:.0f}%, max_reuse={MAX_EDGE_REUSE}"
+        f"coverage_target={COVERAGE_THRESHOLD*100:.1f}%, max_reuse={MAX_EDGE_REUSE}, "
+        f"unused_bonus={profile['unused_bonus']}, frontier_bonus={profile['frontier_bonus']}, "
+        f"end_pull_start={profile['end_pull_start']}, end_pull_weight={profile['end_pull_weight']}"
+    )
+    logger.debug(
+        f"[FIND_ROUTE] Full profile: {profile}"
     )
     
     start_time = time.time()
@@ -718,7 +723,8 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         
         # Early exit if coverage good enough and at end node (or no end node specified)
         coverage_pct = len(used_edges) / len(total_edges)
-        if coverage_pct >= COVERAGE_THRESHOLD and iteration > len(total_edges):
+        min_iterations_required = max(50, int(len(total_edges) * 0.3))  # At least 30% of edges or 50 iterations
+        if coverage_pct >= COVERAGE_THRESHOLD and iteration > min_iterations_required:
             if end_node is None or current_node == end_node:
                 break
     
