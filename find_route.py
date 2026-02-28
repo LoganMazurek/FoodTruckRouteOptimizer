@@ -572,13 +572,13 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         },
         'thorough': {
             'coverage_threshold': 0.92,
-            'max_edge_reuse': 6,
-            'reuse_penalty': 12.0,
-            'used_edge_penalty': 6.0,
-            'unused_bonus': 200.0,
-            'frontier_bonus': 160.0,
-            'backtrack_penalty': 4.0,
-            'uturn_penalty': 1.0,
+            'max_edge_reuse': 7,
+            'reuse_penalty': 8.0,
+            'used_edge_penalty': 4.0,
+            'unused_bonus': 300.0,
+            'frontier_bonus': 250.0,
+            'backtrack_penalty': 2.0,
+            'uturn_penalty': 0.5,
             'edge_length_weight': 0.0,
             'end_pull_start': 0.99,
             'end_pull_weight': 0.00001,
@@ -730,13 +730,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         
         # Early exit if coverage good enough and at end node (or no end node specified)
         coverage_pct = len(used_edges) / len(total_edges)
-        if speed_priority == 'thorough':
-            min_iterations_required = 5  # Very minimal for thorough - let it explore
-        elif speed_priority == 'fastest':
-            min_iterations_required = max(50, int(len(total_edges) * 0.3))
-        else:  # balanced
-            min_iterations_required = max(50, int(len(total_edges) * 0.25))
-        
+        min_iterations_required = max(50, int(len(total_edges) * 0.3))  # At least 30% of edges or 50 iterations
         if coverage_pct >= COVERAGE_THRESHOLD and iteration > min_iterations_required:
             if end_node is None or current_node == end_node:
                 break
