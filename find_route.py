@@ -545,7 +545,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     # Lower score is better.
     speed_profiles = {
         'fastest': {
-            'coverage_threshold': 0.25,
+            'coverage_threshold': 0.30,
             'max_edge_reuse': 1,
             'reuse_penalty': 100.0,
             'used_edge_penalty': 50.0,
@@ -558,7 +558,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
             'end_pull_weight': 0.25,
         },
         'balanced': {
-            'coverage_threshold': 0.72,
+            'coverage_threshold': 0.70,
             'max_edge_reuse': 2,
             'reuse_penalty': 60.0,
             'used_edge_penalty': 28.0,
@@ -571,7 +571,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
             'end_pull_weight': 0.02,
         },
         'thorough': {
-            'coverage_threshold': 0.88,
+            'coverage_threshold': 0.92,
             'max_edge_reuse': 3,
             'reuse_penalty': 40.0,
             'used_edge_penalty': 20.0,

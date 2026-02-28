@@ -412,21 +412,14 @@
                         <span class="stat-label">⏱️ Est. Time</span>
                         <span class="stat-value">{{ variant.route_info.total_duration_min|round|int }} minutes</span>
                     </div>
-                    {% if variant.priority == 'fastest' %}
                     <div class="stat-row">
                         <span class="stat-label">📊 Coverage/Minute</span>
-                        <span class="stat-value">{{ variant.route_info.coverage_per_minute }} miles/min</span>
+                        <span class="stat-value">{{ variant.route_info.coverage_per_minute }}%/min</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">🛣️ Street Coverage</span>
                         <span class="stat-value">{{ variant.route_info.coverage_percent }}%</span>
                     </div>
-                    {% else %}
-                    <div class="stat-row">
-                        <span class="stat-label">🛣️ Coverage</span>
-                        <span class="stat-value">{{ variant.route_info.coverage_percent }}%</span>
-                    </div>
-                    {% endif %}
                     <div class="stat-row">
                         <span class="stat-label">📍 Waypoints</span>
                         <span class="stat-value">{{ variant.waypoints|length }}</span>

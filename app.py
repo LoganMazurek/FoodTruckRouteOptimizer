@@ -384,18 +384,18 @@ def result():
         # Calculate estimated duration in minutes (assuming 30 km/h average speed)
         total_duration_min = (total_distance_m / 1000) / 30 * 60
         
-        # Calculate coverage per minute metric (in miles/min)
+        # Calculate coverage efficiency per minute (as % coverage discovered per minute)
+        # This accounts for duplicate traversals - time spent on already-covered streets doesn't count
         coverage_per_minute = (
-            round((covered_edge_length_m / 1000 * 0.621371) / total_duration_min, 2)
+            round(coverage_percent / total_duration_min, 3)
             if total_duration_min > 0
             else 0
         )
         
-        # Build description based on route priority
-        if priority == 'fastest':
-            description = f"{coverage_per_minute} miles/min coverage"
-        else:
-            description = f"{coverage_percent}% street coverage"
+        # Build description with coverage efficiency for all routes
+        description = f"{coverage_per_minute}% per minute"
+        if coverage_percent > 0:
+            description += f" ({coverage_percent}% coverage)"
         
         if min_length_for_route >= 100:
             description += f" (roads ≥{min_length_for_route}m)"
@@ -420,18 +420,11 @@ def result():
             'route_info': route_info
         })
         
-        if priority == 'fastest':
-            logger.info(
-                f"[RESULT] {name}: {route_info['total_distance_miles']} miles, "
-                f"{route_info['total_duration_min']:.0f} min, {len(pruned_route)} waypoints, "
-                f"{coverage_per_minute:.2f} km/min coverage, {coverage_percent}% street coverage"
-            )
-        else:
-            logger.info(
-                f"[RESULT] {name}: {route_info['total_distance_miles']} miles, "
-                f"{route_info['total_duration_min']:.0f} min, {len(pruned_route)} waypoints, "
-                f"{coverage_percent}% coverage ({covered_edge_length_m:.1f}m / {baseline_total_edge_length_m:.1f}m)"
-            )
+        logger.info(
+            f"[RESULT] {name}: {route_info['total_distance_miles']} miles, "
+            f"{route_info['total_duration_min']:.0f} min, {len(pruned_route)} waypoints, "
+            f"{coverage_per_minute:.3f}%/min coverage efficiency, {coverage_percent}% total coverage"
+        )
     
     if not route_variants:
         return "No valid routes found", 400
