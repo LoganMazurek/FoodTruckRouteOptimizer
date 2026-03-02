@@ -545,12 +545,12 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     # Lower score is better.
     speed_profiles = {
         'fastest': {
-            'coverage_threshold': 0.30,
-            'max_edge_reuse': 1,
-            'reuse_penalty': 100.0,
-            'used_edge_penalty': 50.0,
-            'unused_bonus': 20.0,
-            'frontier_bonus': 10.0,
+            'coverage_threshold': 0.28,
+            'max_edge_reuse': 2,
+            'reuse_penalty': 120.0,
+            'used_edge_penalty': 60.0,
+            'unused_bonus': 9.0,
+            'frontier_bonus': 3.5,
             'backtrack_penalty': 80.0,
             'uturn_penalty': 25.0,
             'edge_length_weight': 0.15,
@@ -558,12 +558,12 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
             'end_pull_weight': 0.20,
         },
         'balanced': {
-            'coverage_threshold': 0.70,
+            'coverage_threshold': 0.71,
             'max_edge_reuse': 2,
-            'reuse_penalty': 70.0,
-            'used_edge_penalty': 35.0,
-            'unused_bonus': 30.0,
-            'frontier_bonus': 20.0,
+            'reuse_penalty': 135.0,
+            'used_edge_penalty': 68.0,
+            'unused_bonus': 3.8,
+            'frontier_bonus': 1.3,
             'backtrack_penalty': 65.0,
             'uturn_penalty': 22.0,
             'edge_length_weight': 0.08,
@@ -571,12 +571,12 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
             'end_pull_weight': 0.04,
         },
         'thorough': {
-            'coverage_threshold': 0.97,
-            'max_edge_reuse': 5,
-            'reuse_penalty': 25.0,
-            'used_edge_penalty': 8.0,
-            'unused_bonus': 120.0,
-            'frontier_bonus': 100.0,
+            'coverage_threshold': 0.945,
+            'max_edge_reuse': 3,
+            'reuse_penalty': 40.0,
+            'used_edge_penalty': 15.0,
+            'unused_bonus': 85.0,
+            'frontier_bonus': 65.0,
             'backtrack_penalty': 10.0,
             'uturn_penalty': 3.0,
             'edge_length_weight': 0.0,
@@ -603,11 +603,11 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     # Greedy traversal with U-turn penalty
     # Increase iteration budget for more thorough exploration
     if speed_priority == 'fastest':
-        max_iterations = len(total_edges) * 2
+        max_iterations = len(total_edges)
     elif speed_priority == 'balanced':
-        max_iterations = len(total_edges) * 4
+        max_iterations = len(total_edges) * 2
     else:  # thorough
-        max_iterations = len(total_edges) * 25
+        max_iterations = len(total_edges) * 5
     
     iteration = 0
     reached_end_node = False
@@ -730,7 +730,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         
         # Early exit if coverage good enough and at end node (or no end node specified)
         coverage_pct = len(used_edges) / len(total_edges)
-        min_iterations_required = max(50, int(len(total_edges) * 0.3))  # At least 30% of edges or 50 iterations
+        min_iterations_required = max(10, int(max_iterations * 0.2))  # At least 20% of max_iterations or 10 iterations
         if coverage_pct >= COVERAGE_THRESHOLD and iteration > min_iterations_required:
             if end_node is None or current_node == end_node:
                 break
