@@ -1,0 +1,28 @@
+{
+  "areas": [
+    {
+      "name": "Chicago",
+      "zipcode": "60601"
+    },
+    {
+      "name": "Atlanta",
+      "zipcode": "30303"
+    },
+    {
+      "name": "New York",
+      "zipcode": "10001"
+    },
+    {
+      "name": "Los Angeles",
+      "zipcode": "90001"
+    },
+    {
+      "name": "San Francisco",
+      "zipcode": "94102"
+    },
+    {
+      "name": "Urban Austin",
+      "bbox": [30.25, 30.35, -97.75, -97.65]
+    }
+  ]
+}

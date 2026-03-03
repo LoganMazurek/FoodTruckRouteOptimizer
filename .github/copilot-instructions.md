@@ -7,7 +7,7 @@ This is a web-based food truck route optimization tool that helps food trucks an
 ## Technology Stack
 
 - **Backend**: Python 3.x with Flask 2.3.0 web framework
-- **Routing Engine**: OSRM (Open Source Routing Machine)
+- **Routing Engine**: NetworkX graph-based optimization
 - **Data Source**: OpenStreetMap via Overpass API
 - **Graph Processing**: NetworkX 3.1
 - **Frontend**: Leaflet.js for interactive mapping
@@ -71,7 +71,6 @@ This is a web-based food truck route optimization tool that helps food trucks an
 - `app.py`: Main Flask application with route handlers
 - `find_route.py`: Route optimization algorithms
 - `get_street_data.py`: OpenStreetMap data fetching
-- `osrm_client.py`: OSRM routing service client
 - `build_urls.py`: URL generation utilities
 - `visualization.py`: Graph visualization functions
 - `utils.py`: General utility functions
@@ -93,11 +92,7 @@ This is a web-based food truck route optimization tool that helps food trucks an
    - Cache data when possible
    - Handle API errors gracefully
 
-2. **OSRM**: Used for route calculation with turn-by-turn instructions
-   - Ensure OSRM server is accessible
-   - Handle connection errors
-
-3. **Google Maps API**: Used for geocoding and map display
+2. **Google Maps API**: Used for geocoding and map display
    - API key required via `GOOGLE_MAPS_API_KEY` environment variable
    - Check for API key presence before using
 

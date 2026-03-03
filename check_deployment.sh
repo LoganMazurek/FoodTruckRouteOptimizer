@@ -47,11 +47,6 @@ echo "🏥 Testing health endpoint..."
 curl -s http://localhost:5001/health | python3 -m json.tool || echo "❌ Health endpoint not responding"
 echo ""
 
-# Check OSRM containers
-echo "🚗 Checking OSRM containers..."
-sudo docker ps --filter name=osrm
-echo ""
-
 # Check Python dependencies
 echo "📦 Checking Python environment..."
 if [ -f "/home/ubuntu/FoodTruckRouteOptimizer/venv/bin/python" ]; then

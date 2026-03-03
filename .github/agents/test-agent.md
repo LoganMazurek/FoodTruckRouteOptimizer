@@ -57,7 +57,7 @@ def test_feature_name(client, mocker):
    - Algorithm correctness
 
 3. **Data Processing**: Test data fetching and transformation
-   - Mock external API calls (OpenStreetMap, OSRM)
+    - Mock external API calls (OpenStreetMap, geocoding)
    - Test data parsing and validation
    - Handle API failures gracefully
 
@@ -70,9 +70,6 @@ def test_feature_name(client, mocker):
 ```python
 # Mock OpenStreetMap API calls
 mocker.patch('get_street_data.fetch_overpass_data', return_value={...})
-
-# Mock OSRM routing
-mocker.patch('osrm_client.get_route_with_waypoints', return_value={...})
 
 # Mock geocoding
 mocker.patch('app.get_coordinates', return_value=(41.8781, -87.6298))

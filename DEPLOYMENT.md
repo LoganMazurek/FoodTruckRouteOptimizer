@@ -123,19 +123,6 @@ cd /home/ubuntu/FoodTruckRouteOptimizer
 venv/bin/python app.py
 ```
 
-#### OSRM Not Running
-
-```bash
-# Check OSRM containers
-sudo docker ps --filter name=osrm
-
-# Restart OSRM
-sudo docker restart osrm-illinois
-
-# View OSRM logs
-sudo docker logs osrm-illinois
-```
-
 #### SSL Certificate Issues
 
 If HTTPS is not working or you see `NET::ERR_CERT_COMMON_NAME_INVALID`:

@@ -23,7 +23,7 @@ A web-based tool designed to help food trucks and mobile businesses plan optimal
 ## Technology Stack
 
 - **Backend**: Python Flask web framework
-- **Routing**: OSRM (Open Source Routing Machine)
+- **Routing**: NetworkX graph-based route optimization
 - **Street Data**: OpenStreetMap via Overpass API
 - **Geocoding**: Nominatim (OpenStreetMap's free geocoding service)
 - **Graph Processing**: NetworkX
@@ -41,12 +41,11 @@ A web-based tool designed to help food trucks and mobile businesses plan optimal
 ### Prerequisites
 
 - Python 3.8 or higher
-- OSRM (Open Source Routing Machine) instance running locally or accessible remotely
 
 **No API keys required!** This application uses free, open-source services:
 - **Nominatim** for geocoding (converting ZIP codes to coordinates)
 - **OpenStreetMap** for map tiles and street data
-- **OSRM** for routing calculations
+- **NetworkX** for routing calculations
 
 ### Setup Steps
 
@@ -67,11 +66,7 @@ A web-based tool designed to help food trucks and mobile businesses plan optimal
    pip install -r requirements.txt
    ```
 
-4. **Ensure OSRM is running**
-   - Set up OSRM with your desired map data (the project includes Illinois data)
-   - OSRM should be accessible at `http://localhost:5000` (configure the URL in `osrm_client.py` if using a different address)
-
-5. **Run the application**
+4. **Run the application**
    ```bash
    python app.py
    ```
@@ -79,7 +74,6 @@ A web-based tool designed to help food trucks and mobile businesses plan optimal
 
 ### Configuration
 
-- **OSRM Server**: Update the OSRM endpoint in `osrm_client.py` if running on a different host/port
 - **Map Data**: The project includes Illinois street data. To use different regions, replace the `.osm.pbf` file in the `data/` directory
 
 ### First Run
@@ -95,7 +89,7 @@ This project is designed to be completely free and open:
 - **Nominatim** provides free geocoding (respecting usage limits)
 - **OpenStreetMap** provides free map tiles and data
 - **Overpass API** provides free street data queries
-- **OSRM** is self-hosted for routing
+- **NetworkX** powers route optimization locally
 
 No credit cards, billing accounts, or API keys required! 🎉
 

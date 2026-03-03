@@ -64,8 +64,6 @@ Add comments for:
 
 # Prune nodes with degree 2 that are just pass-through points
 # This reduces graph complexity without losing coverage
-
-# OSRM has a 100 waypoint limit, so we batch requests
 ```
 
 **Avoid obvious comments:**
