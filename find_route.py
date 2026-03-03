@@ -788,13 +788,13 @@ def filter_turns(route, threshold_degrees=70, way_ids=None, min_distance_meters=
 
 def find_route_drive_efficient(graph, start_node, end_node, max_iterations=None):
     """
-    Efficient driving route that prioritizes coverage with natural driving patterns.
+    Efficient snaking route from start to end with no street repetition.
     
-    Rules (strictly enforced):
-    - Each road can be backtracked on AT MOST once (so max 2 traversals total)
-    - Only turn around (U-turn) if going to a cul-de-sac or court that helps coverage
-    - Always prefer direction towards end node over towards start node
-    - Maximize coverage subject to these constraints
+    Strategy:
+    - Remove dead-ends from graph (they don't help with through-routing)
+    - Each street traversed exactly once (no backtracking)
+    - Snake back and forth towards the end node
+    - When stuck, jump to nearest unexplored area closer to end
     
     Args:
         graph: NetworkX graph
@@ -803,122 +803,169 @@ def find_route_drive_efficient(graph, start_node, end_node, max_iterations=None)
         max_iterations: Optional iteration limit
     
     Returns:
-        List of node IDs representing the route
+        Dict with route and coverage metadata
     """
     G = graph.copy()
     
     if start_node not in G or end_node not in G:
         logger.warning(f"[DRIVE_EFFICIENT] Start or end node not in graph")
-        return [start_node] if start_node in G else []
+        return {
+            'route': [],
+            'path': [],
+            'covered_edge_length_m': 0,
+            'total_edge_length_m': 0,
+            'covered_edge_count': 0,
+            'total_edge_count': 0
+        }
+    
+    # Remove dead-ends to create a cleaner routing network
+    # Keep start and end nodes protected
+    protected = {start_node, end_node}
+    G_filtered = filter_dead_end_nodes(G, protected_nodes=protected, max_iterations=5)
+    
+    # If filtering removed too much, use original graph
+    if G_filtered.number_of_nodes() < 3:
+        G_filtered = G.copy()
     
     path = [start_node]
     used_edges = set()
-    backtracked_edges = set()  # Edges we've already backtracked on
-    edge_usage_count = defaultdict(int)
     current_node = start_node
     
-    total_edges = set(frozenset(e) for e in G.edges())
+    total_edges = set(frozenset(e) for e in G_filtered.edges())
     total_edge_count = len(total_edges)
     
     if max_iterations is None:
-        max_iterations = total_edge_count * 8
+        max_iterations = total_edge_count * 3
     
-    intersections = {n for n in G.nodes if G.degree(n) >= 3}
-    
+    end_coords = G_filtered.nodes[end_node]['coordinates']
     iteration = 0
+    prev_node = None  # Track previous node for better path selection
+    
     while iteration < max_iterations and current_node != end_node:
         iteration += 1
-        neighbors = list(G.neighbors(current_node))
+        neighbors = list(G_filtered.neighbors(current_node))
         if not neighbors:
             break
         
-        # Categorize neighbors
+        # Find unexplored edges
         unexplored = []
-        cul_de_sac = []
-        backtrackable = []
-        
         for neighbor in neighbors:
             edge = frozenset([current_node, neighbor])
-            usage = edge_usage_count[edge]
-            
-            # Rule: Can't use an edge more than twice
-            if usage >= 2:
-                continue
-            
-            # Is this edge unexplored?
-            if usage == 0:
-                unexplored.append((neighbor, False))
-            else:
-                # This is a backtrack candidate
-                # Check if neighbor is a cul-de-sac or court (degree 1)
-                if G.degree(neighbor) == 1:
-                    cul_de_sac.append((neighbor, True))
-                else:
-                    # Regular backtrack only if not already backtracked
-                    if edge not in backtracked_edges:
-                        backtrackable.append((neighbor, True))
+            if edge not in used_edges:
+                # Calculate distance to end node
+                neighbor_coords = G_filtered.nodes[neighbor]['coordinates']
+                dist_to_end = haversine(
+                    neighbor_coords[0], neighbor_coords[1],
+                    end_coords[0], end_coords[1]
+                )
+                
+                # Calculate current distance to end
+                curr_coords = G_filtered.nodes[current_node]['coordinates']
+                curr_dist_to_end = haversine(
+                    curr_coords[0], curr_coords[1],
+                    end_coords[0], end_coords[1]
+                )
+                
+                # Prefer edges that don't always go toward end (allows winding)
+                # Score: lower is better
+                # - Slight preference for moving toward end (not too aggressive)
+                # - Penalize backtracking to previous node
+                # - Favor longer edges (more coverage per turn)
+                edge_length = G_filtered[current_node][neighbor].get('distance', 1)
+                
+                toward_end_score = (dist_to_end - curr_dist_to_end) / 1000.0  # Convert to km, can be negative
+                backtrack_penalty = 1000 if neighbor == prev_node else 0
+                length_bonus = -edge_length / 100.0  # Favor longer edges
+                
+                # Gentle bias toward end (0.3 weight), but allow lateral/winding movement
+                score = (toward_end_score * 0.3) + backtrack_penalty + length_bonus
+                
+                unexplored.append((neighbor, score, edge, dist_to_end))
         
-        # Priority 1: Unexplored edges towards the end (lower distance to end = better)
         if unexplored:
-            end_coords = G.nodes[end_node]['coordinates']
-            unexplored.sort(key=lambda x: haversine(
-                G.nodes[x[0]]['coordinates'][0], G.nodes[x[0]]['coordinates'][1],
-                end_coords[0], end_coords[1]
-            ))
-            next_node, is_backtrack = unexplored[0]
-        
-        # Priority 2: Cul-de-sacs and courts (they help coverage with U-turn allowed)
-        elif cul_de_sac:
-            next_node, is_backtrack = cul_de_sac[0]
-        
-        # Priority 3: Backtrackable roads (limited to once per road)
-        elif backtrackable:
-            next_node, is_backtrack = backtrackable[0]
-        
-        # No valid moves
+            # Sort by score (allows winding), with distance to end as tiebreaker
+            unexplored.sort(key=lambda x: (x[1], x[3]))
+            next_node = unexplored[0][0]
+            edge = unexplored[0][2]
+            
+            path.append(next_node)
+            used_edges.add(edge)
+            prev_node = current_node
+            current_node = next_node
         else:
-            logger.debug(f"[DRIVE_EFFICIENT] No valid moves from node {current_node} at iteration {iteration}/{max_iterations}")
-            break
-        
-        edge = frozenset([current_node, next_node])
-        path.append(next_node)
-        used_edges.add(edge)
-        edge_usage_count[edge] += 1
-        
-        # Mark as backtracked if this is a second traversal
-        if is_backtrack and edge_usage_count[edge] == 2:
-            backtracked_edges.add(edge)
-        
-        current_node = next_node
+            # No unexplored edges - need to find a way to unexplored areas
+            # Find all nodes with unexplored edges, prefer closer to end
+            candidates = []
+            for node in G_filtered.nodes():
+                if node == current_node:
+                    continue
+                # Check if this node has unexplored edges
+                has_unexplored = False
+                for neighbor in G_filtered.neighbors(node):
+                    edge = frozenset([node, neighbor])
+                    if edge not in used_edges:
+                        has_unexplored = True
+                        break
+                
+                if has_unexplored:
+                    node_coords = G_filtered.nodes[node]['coordinates']
+                    dist_to_end = haversine(
+                        node_coords[0], node_coords[1],
+                        end_coords[0], end_coords[1]
+                    )
+                    # Try to find shortest path to this node
+                    try:
+                        path_length = nx.shortest_path_length(G_filtered, current_node, node, weight='distance')
+                        candidates.append((node, dist_to_end, path_length))
+                    except nx.NetworkXNoPath:
+                        continue
+            
+            if candidates:
+                # Pick node closest to end with shortest path
+                candidates.sort(key=lambda x: (x[1], x[2]))
+                target_node = candidates[0][0]
+                
+                try:
+                    bridge_path = nx.shortest_path(G_filtered, current_node, target_node, weight='distance')
+                    # Add bridge path (skip first node since it's current)
+                    for node in bridge_path[1:]:
+                        path.append(node)
+                    current_node = target_node
+                except nx.NetworkXNoPath:
+                    break
+            else:
+                # No more unexplored areas - navigate to end
+                break
     
     # Navigate to end node if not there
     if current_node != end_node:
         try:
-            shortest_path = nx.shortest_path(G, current_node, end_node)
+            shortest_path = nx.shortest_path(G_filtered, current_node, end_node, weight='distance')
             path.extend(shortest_path[1:])
             current_node = end_node
         except nx.NetworkXNoPath:
             logger.debug(f"[DRIVE_EFFICIENT] No path to end node from {current_node}")
     
-    coverage_pct = len(used_edges) / total_edge_count
+    # Calculate coverage
+    coverage_pct = len(used_edges) / total_edge_count if total_edge_count > 0 else 0
     
     # Calculate covered edge length
-    total_edge_length = sum(G[u][v].get('distance', 0) for u, v in G.edges())
+    total_edge_length = sum(G_filtered[u][v].get('distance', 0) for u, v in G_filtered.edges())
     covered_edge_length = 0
     for edge in used_edges:
         edge_tuple = tuple(edge)
         if len(edge_tuple) == 2:
             u, v = edge_tuple
-            if G.has_edge(u, v):
-                covered_edge_length += G[u][v].get('distance', 0)
+            if G_filtered.has_edge(u, v):
+                covered_edge_length += G_filtered[u][v].get('distance', 0)
     
     logger.debug(
-        f"[DRIVE_EFFICIENT] Route complete: {len(path)} nodes, {len(used_edges)}/{total_edge_count} edges ({coverage_pct*100:.1f}%), "
+        f"[DRIVE_EFFICIENT] Snaking route complete: {len(path)} nodes, {len(used_edges)}/{total_edge_count} edges ({coverage_pct*100:.1f}%), "
         f"iterations {iteration}/{max_iterations}"
     )
     
     # Expand with intermediate nodes
-    expanded_route = expand_route_with_geometry(path, G)
+    expanded_route = expand_route_with_geometry(path, G_filtered)
     
     # Return route with coverage metadata
     return {
