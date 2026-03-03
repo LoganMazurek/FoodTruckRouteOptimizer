@@ -431,7 +431,6 @@ def result():
         # Get professional turn-by-turn navigation from OSRM
         turn_by_turn_instructions = []
         total_distance_m = 0
-        osrm_geometry = None
         osrm_route_data = None
         
         try:
@@ -442,7 +441,6 @@ def result():
                 # Extract professional turn-by-turn instructions from OSRM
                 turn_by_turn_instructions = extract_turn_by_turn_instructions(osrm_route)
                 total_distance_m = osrm_route.get('distance', 0)
-                osrm_geometry = osrm_route.get('geometry', None)
                 osrm_route_data = osrm_route
                 logger.info(f"Got {len(turn_by_turn_instructions)} instructions from OSRM, "
                            f"distance: {total_distance_m}m")
@@ -516,7 +514,7 @@ def result():
             'name': name,
             'description': description,
             'waypoints': pruned_route,
-            'geometry': osrm_geometry if osrm_geometry else pruned_route,  # Use OSRM detailed route if available
+            'geometry': pruned_route,  # Use waypoints for map display (cleaner, works with Leaflet)
             'instructions': consolidate_turn_by_turn(turn_by_turn_instructions),
             'route_info': route_info,
             'osrm_data': osrm_route_data  # Include full OSRM response for frontend use

@@ -546,7 +546,21 @@
                 maxZoom: 19
             }).addTo(map);
             
-            const routeLine = L.polyline(variant.geometry, {
+            // Use waypoints (which are guaranteed to be [lat, lon] format)
+            const validGeometry = (variant.geometry && variant.geometry.length > 0) 
+                ? variant.geometry 
+                : variant.waypoints;
+            
+            if (!validGeometry || validGeometry.length < 2) {
+                console.error(`Map ${index}: Invalid geometry or waypoints`, {
+                    geometry: variant.geometry,
+                    waypoints: variant.waypoints
+                });
+                map.setView([0, 0], 2); // Default view
+                return;
+            }
+            
+            const routeLine = L.polyline(validGeometry, {
                 color: '#667eea',
                 weight: 4,
                 opacity: 0.8
@@ -563,7 +577,13 @@
                 L.marker([variant.waypoints[0][0], variant.waypoints[0][1]], { icon: startIcon }).addTo(map);
             }
             
-            map.fitBounds(routeLine.getBounds(), { padding: [20, 20] });
+            const bounds = routeLine.getBounds();
+            if (bounds.isValid()) {
+                map.fitBounds(bounds, { padding: [20, 20] });
+            } else {
+                console.error(`Map ${index}: Invalid bounds`, bounds);
+                map.setView([0, 0], 2); // Default view
+            }
         });
 
         // Show detailed modal
@@ -584,7 +604,18 @@
                     maxZoom: 19
                 }).addTo(largeMap);
                 
-                const routeLine = L.polyline(variant.geometry, {
+                // Use waypoints for the route line
+                const validGeometry = (variant.geometry && variant.geometry.length > 0) 
+                    ? variant.geometry 
+                    : variant.waypoints;
+                
+                if (!validGeometry || validGeometry.length < 2) {
+                    console.error(`Detailed Map ${index}: Invalid geometry`, validGeometry);
+                    largeMap.setView([0, 0], 2);
+                    return;
+                }
+                
+                const routeLine = L.polyline(validGeometry, {
                     color: '#667eea',
                     weight: 5,
                     opacity: 0.8
@@ -615,7 +646,13 @@
                     }
                 });
                 
-                largeMap.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
+                const bounds = routeLine.getBounds();
+                if (bounds.isValid()) {
+                    largeMap.fitBounds(bounds, { padding: [50, 50] });
+                } else {
+                    console.error(`Detailed Map ${index}: Invalid bounds`);
+                    largeMap.setView([0, 0], 2);
+                }
             }
         }
 
