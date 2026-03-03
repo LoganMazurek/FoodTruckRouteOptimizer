@@ -3,7 +3,7 @@ import os
 import logging
 import overpy
 import time
-from osm_cache import cache_exists, get_cached_data, save_to_cache
+from osm_cache import cache_exists, get_cached_data, save_to_cache, find_containing_cached_region
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
@@ -165,13 +165,24 @@ def fetch_overpass_data(min_lat, max_lat, min_lng, max_lng, debug=False, use_cac
     
     Returns:
         Overpass API result object with nodes and ways
+    
+    Cache Strategy:
+        1. Check for exact bbox match
+        2. Check if request bbox is contained within a larger cached bbox
+        3. Query API and cache result
     """
     # Check cache first if enabled
-    if use_cache and cache_exists(min_lat, max_lat, min_lng, max_lng):
-        logger.info(f"Retrieving cached OSM data for bounds: ({min_lat},{min_lng},{max_lat},{max_lng})")
-        nodes, ways = get_cached_data(min_lat, max_lat, min_lng, max_lng)
+    if use_cache:
+        # Try exact bbox match first
+        if cache_exists(min_lat, max_lat, min_lng, max_lng):
+            logger.info(f"Exact cache hit for bbox: ({min_lat},{min_lng},{max_lat},{max_lng})")
+            nodes, ways = get_cached_data(min_lat, max_lat, min_lng, max_lng)
+            if nodes is not None and ways is not None:
+                return _create_overpass_result_from_cache(nodes, ways)
+        
+        # Try spatial containment - find a larger cached bbox that contains this request
+        nodes, ways = find_containing_cached_region(min_lat, max_lat, min_lng, max_lng)
         if nodes is not None and ways is not None:
-            # Convert cached data back to Overpass result format
             return _create_overpass_result_from_cache(nodes, ways)
     
     # Query not in cache, fetch from API

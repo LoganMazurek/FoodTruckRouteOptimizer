@@ -9,7 +9,7 @@ import networkx as nx
 from build_urls import get_google_maps_url
 from find_route import clean_up_graph, find_route_cpp, find_route_max_coverage_optimized, simplify_graph, prune_common_sense_nodes
 from get_street_data import extract_nodes_and_ways, fetch_overpass_data, get_coordinates
-from osrm_client import get_route_with_waypoints
+from osrm_client import get_route_with_waypoints, extract_turn_by_turn_instructions
 
 app = Flask(__name__)
 # Use environment variable for secret key
@@ -428,35 +428,57 @@ def result():
             logger.warning(f"[RESULT] {name} too short after pruning")
             continue
         
-        # Calculate route statistics for display
-        total_distance_m = 0
+        # Get professional turn-by-turn navigation from OSRM
         turn_by_turn_instructions = []
+        total_distance_m = 0
+        osrm_geometry = None
+        osrm_route_data = None
         
-        for i in range(len(optimized_route) - 1):
-            curr_coord = optimized_route[i]
-            next_coord = optimized_route[i + 1]
+        try:
+            logger.info(f"Requesting OSRM navigation for {len(optimized_route)} waypoints")
+            osrm_route = get_route_with_waypoints(optimized_route, overview="full")
             
-            # Find the graph edge
-            curr_node = None
-            next_node = None
-            for node, data in route_graph.nodes(data=True):
-                if data.get('coordinates') == curr_coord:
-                    curr_node = node
-                if data.get('coordinates') == next_coord:
-                    next_node = node
-            
-            if curr_node and next_node and route_graph.has_edge(curr_node, next_node):
-                edge_data = route_graph[curr_node][next_node]
-                distance = edge_data.get('distance', 0)
-                street_name = edge_data.get('way_id', 'unnamed road')
-                total_distance_m += distance
+            if osrm_route:
+                # Extract professional turn-by-turn instructions from OSRM
+                turn_by_turn_instructions = extract_turn_by_turn_instructions(osrm_route)
+                total_distance_m = osrm_route.get('distance', 0)
+                osrm_geometry = osrm_route.get('geometry', None)
+                osrm_route_data = osrm_route
+                logger.info(f"Got {len(turn_by_turn_instructions)} instructions from OSRM, "
+                           f"distance: {total_distance_m}m")
+            else:
+                logger.warning("OSRM returned no route, falling back to graph-based instructions")
+                raise Exception("OSRM failed")
                 
-                turn_by_turn_instructions.append({
-                    'distance': distance,
-                    'duration': distance / 8.33,  # ~30 km/h = 8.33 m/s
-                    'instruction': f'Continue on {street_name}',
-                    'name': street_name
-                })
+        except Exception as e:
+            # Fallback: Build instructions from graph edges if OSRM fails
+            logger.warning(f"OSRM navigation failed ({e}), using graph-based instructions")
+            
+            for i in range(len(optimized_route) - 1):
+                curr_coord = optimized_route[i]
+                next_coord = optimized_route[i + 1]
+                
+                # Find the graph edge
+                curr_node = None
+                next_node = None
+                for node, data in route_graph.nodes(data=True):
+                    if data.get('coordinates') == curr_coord:
+                        curr_node = node
+                    if data.get('coordinates') == next_coord:
+                        next_node = node
+                
+                if curr_node and next_node and route_graph.has_edge(curr_node, next_node):
+                    edge_data = route_graph[curr_node][next_node]
+                    distance = edge_data.get('distance', 0)
+                    street_name = edge_data.get('way_id', 'unnamed road')
+                    total_distance_m += distance
+                    
+                    turn_by_turn_instructions.append({
+                        'instruction': f'Continue on {street_name}',
+                        'name': street_name,
+                        'distance': distance,
+                        'duration': distance / 8.33  # ~30 km/h = 8.33 m/s
+                    })
         
         # Use coverage metadata from route optimization (already calculated correctly)
         coverage_percent = (
@@ -494,9 +516,10 @@ def result():
             'name': name,
             'description': description,
             'waypoints': pruned_route,
-            'geometry': pruned_route,
+            'geometry': osrm_geometry if osrm_geometry else pruned_route,  # Use OSRM detailed route if available
             'instructions': consolidate_turn_by_turn(turn_by_turn_instructions),
-            'route_info': route_info
+            'route_info': route_info,
+            'osrm_data': osrm_route_data  # Include full OSRM response for frontend use
         })
         
         logger.info(

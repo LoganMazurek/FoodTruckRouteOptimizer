@@ -209,3 +209,133 @@ def decode_polyline(encoded):
         coords.append((lat / 1e5, lon / 1e5))
     
     return coords
+
+
+def extract_turn_by_turn_instructions(osrm_route):
+    """
+    Extract professional turn-by-turn instructions from OSRM route response.
+    
+    Args:
+        osrm_route: Route dict from get_route_with_waypoints or similar OSRM API call
+    
+    Returns:
+        List of instruction dicts with keys: instruction, name, distance, duration
+        Returns empty list if osrm_route is None or invalid
+    """
+    if not osrm_route:
+        return []
+    
+    instructions = []
+    
+    # Extract legs (each leg is between two waypoints)
+    legs = osrm_route.get('legs', [])
+    for leg in legs:
+        steps = leg.get('steps', [])
+        
+        for step in steps:
+            # Each step has a maneuver with detailed turn information
+            maneuver = step.get('maneuver', {})
+            modifier = maneuver.get('modifier', '')
+            step_type = maneuver.get('type', 'turn')
+            
+            name = step.get('name', 'unnamed road')
+            distance = step.get('distance', 0)
+            duration = step.get('duration', 0)
+            
+            # Build professional instruction text from maneuver type
+            instruction_text = _build_instruction_text(step_type, modifier, name)
+            
+            instructions.append({
+                'instruction': instruction_text,
+                'name': name,
+                'distance': round(distance, 1),
+                'duration': round(duration, 1),
+                'maneuver_type': step_type,
+                'modifier': modifier
+            })
+    
+    logger.info(f"Extracted {len(instructions)} turn-by-turn instructions from OSRM")
+    return instructions
+
+
+def _build_instruction_text(maneuver_type, modifier, name):
+    """
+    Build human-readable instruction text from OSRM maneuver data.
+    
+    Args:
+        maneuver_type: Type of maneuver (e.g., 'turn', 'merge', 'exit', 'roundabout')
+        modifier: Direction modifier (e.g., 'left', 'right', 'sharp right', 'uturn')
+        name: Street or road name
+    
+    Returns:
+        Human-readable instruction string
+    """
+    if maneuver_type == 'depart':
+        return f"Start on {name}"
+    
+    elif maneuver_type == 'arrive':
+        return f"Arrive at {name}"
+    
+    elif maneuver_type == 'turn':
+        # Basic turn with direction
+        if modifier == 'sharp left':
+            return f"Make a sharp left turn onto {name}"
+        elif modifier == 'left':
+            return f"Turn left onto {name}"
+        elif modifier == 'slight left':
+            return f"Keep left onto {name}"
+        elif modifier == 'sharp right':
+            return f"Make a sharp right turn onto {name}"
+        elif modifier == 'right':
+            return f"Turn right onto {name}"
+        elif modifier == 'slight right':
+            return f"Keep right onto {name}"
+        elif modifier == 'uturn':
+            return f"Make a U-turn onto {name}"
+        else:
+            return f"Turn onto {name}"
+    
+    elif maneuver_type == 'merge':
+        if modifier:
+            return f"Merge {modifier} onto {name}"
+        return f"Merge onto {name}"
+    
+    elif maneuver_type == 'enter roundabout' or maneuver_type == 'roundabout':
+        if modifier:
+            return f"Enter roundabout and take the {modifier} exit onto {name}"
+        return f"Enter roundabout onto {name}"
+    
+    elif maneuver_type == 'exit roundabout':
+        return f"Exit roundabout onto {name}"
+    
+    elif maneuver_type == 'on ramp':
+        if modifier:
+            return f"Take the {modifier} ramp onto {name}"
+        return f"Take the ramp onto {name}"
+    
+    elif maneuver_type == 'off ramp':
+        if modifier:
+            return f"Take the {modifier} exit onto {name}"
+        return f"Take the exit onto {name}"
+    
+    elif maneuver_type == 'fork':
+        if modifier:
+            return f"At the fork, keep {modifier} onto {name}"
+        return f"Choose the correct fork onto {name}"
+    
+    elif maneuver_type == 'end of road':
+        if modifier:
+            return f"At the end of the road, turn {modifier} onto {name}"
+        return f"Continue onto {name}"
+    
+    elif maneuver_type == 'new name':
+        return f"Continue on {name}"
+    
+    elif maneuver_type == 'continue':
+        return f"Continue on {name}"
+    
+    elif maneuver_type == 'waypoint':
+        return f"Pass through waypoint on {name}"
+    
+    else:
+        return f"Continue on {name}"

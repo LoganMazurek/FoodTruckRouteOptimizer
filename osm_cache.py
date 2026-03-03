@@ -124,6 +124,141 @@ def get_cached_data(min_lat, max_lat, min_lng, max_lng):
     return None, None
 
 
+def _bbox_contains_point(cached_min_lat, cached_max_lat, cached_min_lng, cached_max_lng,
+                        point_lat, point_lon):
+    """Check if a point is within a bounding box."""
+    return (cached_min_lat <= point_lat <= cached_max_lat and
+            cached_min_lng <= point_lon <= cached_max_lng)
+
+
+def _bbox_contains_bbox(cached_min_lat, cached_max_lat, cached_min_lng, cached_max_lng,
+                       req_min_lat, req_max_lat, req_min_lng, req_max_lng):
+    """Check if a cached bbox fully contains a requested bbox."""
+    return (cached_min_lat <= req_min_lat and
+            cached_max_lat >= req_max_lat and
+            cached_min_lng <= req_min_lng and
+            cached_max_lng >= req_max_lng)
+
+
+def find_containing_cached_region(min_lat, max_lat, min_lng, max_lng):
+    """
+    Find a cached region that fully contains the requested bbox.
+    
+    If found, returns (nodes, ways) extracted from that region.
+    If not found, returns (None, None).
+    
+    This allows serving requests that fall within a larger cached area
+    without making a new API call.
+    """
+    initialize_cache_db()
+    
+    min_lat, max_lat, min_lng, max_lng = _normalize_bbox(min_lat, max_lat, min_lng, max_lng)
+    
+    conn = sqlite3.connect(CACHE_DB)
+    cursor = conn.cursor()
+    
+    # Find all cached regions
+    cursor.execute("""
+        SELECT min_lat, max_lat, min_lng, max_lng, data_json 
+        FROM cached_regions
+        ORDER BY (max_lat - min_lat) * (max_lng - min_lng) ASC
+    """)
+    
+    regions = cursor.fetchall()
+    conn.close()
+    
+    # Find the smallest cached region that contains our bbox
+    for cached_min_lat, cached_max_lat, cached_min_lng, cached_max_lng, data_json in regions:
+        if _bbox_contains_bbox(cached_min_lat, cached_max_lat, cached_min_lng, cached_max_lng,
+                               min_lat, max_lat, min_lng, max_lng):
+            try:
+                data = json.loads(data_json)
+                nodes = data['nodes']
+                ways = data['ways']
+                
+                # Filter nodes and ways to only those within the requested bbox
+                filtered_nodes = _filter_nodes_by_bbox(nodes, min_lat, max_lat, min_lng, max_lng)
+                filtered_ways = _filter_ways_by_bbox(ways, filtered_nodes)
+                
+                logger.info(
+                    f"Spatial cache hit: Found cached region "
+                    f"({cached_min_lat},{cached_min_lng},{cached_max_lat},{cached_max_lng}) "
+                    f"containing requested bbox ({min_lat},{min_lng},{max_lat},{max_lng})"
+                )
+                
+                return filtered_nodes, filtered_ways
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.error(f"Failed to process cached data: {e}")
+                continue
+    
+    return None, None
+
+
+def _filter_nodes_by_bbox(nodes_dict, min_lat, max_lat, min_lng, max_lng):
+    """
+    Filter nodes to only include those within a bounding box.
+    
+    Args:
+        nodes_dict: Dictionary of {node_id: (lat, lon)}
+        min_lat, max_lat, min_lng, max_lng: Bounding box
+    
+    Returns:
+        Filtered dictionary of nodes within bbox
+    """
+    filtered = {}
+    for node_id, (lat, lon) in nodes_dict.items():
+        if min_lat <= lat <= max_lat and min_lng <= lon <= max_lng:
+            filtered[node_id] = (lat, lon)
+    return filtered
+
+
+def _filter_ways_by_bbox(ways_list, valid_nodes_dict):
+    """
+    Filter ways to only include those that reference filtered nodes.
+    
+    Removes ways where node references don't exist in filtered nodes.
+    Also splits ways into contiguous segments of valid nodes.
+    
+    Args:
+        ways_list: List of way dictionaries
+        valid_nodes_dict: Dictionary of filtered nodes
+    
+    Returns:
+        Filtered list of way dictionaries
+    """
+    valid_node_ids = set(valid_nodes_dict.keys())
+    filtered_ways = []
+    
+    for way in ways_list:
+        node_refs = way['nodes']
+        
+        # Split into contiguous segments of valid nodes
+        current_segment = []
+        for node_id in node_refs:
+            # Convert to string for comparison (nodes_dict uses string keys)
+            node_id_str = str(node_id)
+            if node_id_str in valid_node_ids or node_id in valid_node_ids:
+                current_segment.append(node_id)
+            else:
+                if len(current_segment) >= 2:
+                    filtered_ways.append({
+                        'name': way['name'],
+                        'nodes': current_segment,
+                        'highway': way['highway']
+                    })
+                current_segment = []
+        
+        # Add final segment if it has at least 2 nodes
+        if len(current_segment) >= 2:
+            filtered_ways.append({
+                'name': way['name'],
+                'nodes': current_segment,
+                'highway': way['highway']
+            })
+    
+    return filtered_ways
+
+
 def save_to_cache(min_lat, max_lat, min_lng, max_lng, nodes, ways):
     """
     Save OSM data to cache for a bounding box.
