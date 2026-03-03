@@ -3,6 +3,7 @@ import os
 import logging
 import overpy
 import time
+from osm_cache import cache_exists, get_cached_data, save_to_cache
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
@@ -153,10 +154,27 @@ def make_request_with_retry(query, retries=3, backoff_factor=1):
     logger.error("All retry attempts failed.")
     return None
 
-def fetch_overpass_data(min_lat, max_lat, min_lng, max_lng, debug=False):
+def fetch_overpass_data(min_lat, max_lat, min_lng, max_lng, debug=False, use_cache=True):
     """
-    Fetch street data from Overpass API with retry logic and proper error handling.
+    Fetch street data from Overpass API with caching and retry logic.
+    
+    Args:
+        min_lat, max_lat, min_lng, max_lng: Bounding box coordinates
+        debug: Print detailed information
+        use_cache: Check/store cache (default True)
+    
+    Returns:
+        Overpass API result object with nodes and ways
     """
+    # Check cache first if enabled
+    if use_cache and cache_exists(min_lat, max_lat, min_lng, max_lng):
+        logger.info(f"Retrieving cached OSM data for bounds: ({min_lat},{min_lng},{max_lat},{max_lng})")
+        nodes, ways = get_cached_data(min_lat, max_lat, min_lng, max_lng)
+        if nodes is not None and ways is not None:
+            # Convert cached data back to Overpass result format
+            return _create_overpass_result_from_cache(nodes, ways)
+    
+    # Query not in cache, fetch from API
     query = f"""
     (
       way["highway"~"^(primary|secondary|tertiary|residential)"]({min_lat},{min_lng},{max_lat},{max_lng});
@@ -171,6 +189,22 @@ def fetch_overpass_data(min_lat, max_lat, min_lng, max_lng, debug=False):
     if result is None:
         logger.error(f"Failed to fetch Overpass data for bounds: ({min_lat},{min_lng},{max_lat},{max_lng})")
         raise Exception("Overpass API request failed after multiple retries. The API may be rate limiting requests.")
+    
+    # Cache the result for future queries
+    if use_cache:
+        nodes_dict = {node.id: (float(node.lat), float(node.lon)) for node in result.nodes}
+        ways_list = []
+        for way in result.ways:
+            street_name = way.tags.get("name")
+            if street_name:
+                highway_type = way.tags.get("highway", "unclassified")
+                node_refs = [n.id for n in way.nodes]
+                ways_list.append({
+                    "name": street_name,
+                    "nodes": node_refs,
+                    "highway": highway_type
+                })
+        save_to_cache(min_lat, max_lat, min_lng, max_lng, nodes_dict, ways_list)
     
     if (debug):
         # Print nodes
@@ -191,3 +225,40 @@ def fetch_overpass_data(min_lat, max_lat, min_lng, max_lng, debug=False):
             street_name = way.tags.get("name", "Unnamed Street")
             print(f"Street Name: {street_name}")
     return result
+
+
+def _create_overpass_result_from_cache(nodes_dict, ways_list):
+    """
+    Convert cached nodes and ways back to Overpass result format.
+    
+    Args:
+        nodes_dict: Dictionary of {node_id: (lat, lon)}
+        ways_list: List of way dictionaries
+    
+    Returns:
+        SimpleNamespace object mimicking overpy.Result structure
+    """
+    from types import SimpleNamespace
+    from collections import namedtuple
+    
+    # Create node objects
+    CachedNode = namedtuple('CachedNode', ['id', 'lat', 'lon'])
+    cached_nodes = [
+        CachedNode(id=int(node_id), lat=lat, lon=lon)
+        for node_id, (lat, lon) in nodes_dict.items()
+    ]
+    
+    # Create way objects with minimal attributes
+    class CachedWay:
+        def __init__(self, name, nodes, highway):
+            self.id = None
+            self.tags = {'name': name, 'highway': highway}
+            self.nodes = [SimpleNamespace(id=n) for n in nodes]
+    
+    cached_ways = [
+        CachedWay(way['name'], way['nodes'], way['highway'])
+        for way in ways_list
+    ]
+    
+    # Return result object
+    return SimpleNamespace(nodes=cached_nodes, ways=cached_ways)

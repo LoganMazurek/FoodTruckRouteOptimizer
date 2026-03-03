@@ -49,12 +49,14 @@ cd /home/ubuntu/FoodTruckRouteOptimizer
 
 # Create necessary directories if they don't exist
 mkdir -p data/illinois
+mkdir -p data/cache
 mkdir -p deploy/osrm
 mkdir -p temp
 
 # Set proper permissions
 chown -R ubuntu:ubuntu /home/ubuntu/FoodTruckRouteOptimizer
 chmod -R 755 /home/ubuntu/FoodTruckRouteOptimizer/temp
+chmod -R 755 /home/ubuntu/FoodTruckRouteOptimizer/data/cache
 
 OSRM_PROFILE_DIR="/home/ubuntu/FoodTruckRouteOptimizer/deploy/osrm"
 OSRM_PROFILE_BASE="$OSRM_PROFILE_DIR/car.lua"
@@ -128,6 +130,28 @@ fi
 # Install Python dependencies in venv
 echo "📦 Installing Python dependencies..."
 venv/bin/pip install -r requirements.txt
+
+# Initialize OSM cache database
+echo "💾 Initializing OSM cache database..."
+if [ -f "osm_cache.py" ]; then
+    venv/bin/python -c "from osm_cache import initialize_cache_db; initialize_cache_db()"
+    echo "✓ Cache database initialized"
+else
+    echo "⚠️  osm_cache.py not found - cache will initialize on first use"
+fi
+
+# Pre-cache top user ZIP codes
+echo "🗺️  Pre-caching top user areas..."
+TOP_ZIPCODES="60565 60564 60504 60490 60540"
+for zipcode in $TOP_ZIPCODES; do
+    echo "  Caching ZIP code $zipcode..."
+    if venv/bin/python predownload_cache.py --zipcode "$zipcode" 2>&1 | grep -q "Cached"; then
+        echo "    ✓ Cached $zipcode"
+    else
+        echo "    ⚠️  Failed to cache $zipcode (API may be temporarily unavailable)"
+    fi
+done
+echo "✓ Pre-caching complete"
 
 # Create supervisor config for Flask
 sudo tee /etc/supervisor/conf.d/flask.conf > /dev/null <<EOF
@@ -239,6 +263,10 @@ echo ""
 echo "Routing:"
 echo "  Illinois: Local OSRM (port 5000)"
 echo "  Other states: Public OSRM"
+echo ""
+echo "Caching:"
+echo "  Street data is automatically cached locally on first use"
+echo "  To pre-cache areas, run: python3 predownload_cache.py --help"
 echo ""
 echo "View logs:"
 echo "  Flask: sudo tail -f /var/log/flask.log"
