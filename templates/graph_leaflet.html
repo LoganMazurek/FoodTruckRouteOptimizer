@@ -253,6 +253,17 @@
                         <button id="optimize-btn" class="btn btn-danger btn-compact" disabled>⚡ Optimize Route</button>
                         <button id="delete-btn" class="btn btn-secondary btn-compact" disabled>🗑️ Delete Selected Nodes</button>
                     </div>
+                    <div class="mt-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="filter-dead-ends" checked>
+                            <label class="form-check-label" for="filter-dead-ends" style="font-size: 0.9em;">
+                                🚫 Filter Dead-Ends & Courts
+                            </label>
+                            <div style="font-size: 0.8em; color: #6c757d; margin-top: 4px; margin-left: 24px;">
+                                Exclude cul-de-sacs and short dead-end streets where you'd need to turn around
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="card legend">
                     <div class="card-header">
@@ -460,11 +471,15 @@
                 return;
             }
             
-            // Go directly to results page with 3 route options (using default settings)
+            // Get filter dead-ends checkbox value
+            const filterDeadEnds = document.getElementById('filter-dead-ends').checked;
+            
+            // Go directly to results page with 3 route options
             let url = `/result?boundary_id=${boundaryId}&start_node=${startNodeId}`;
             if (endNodeId) {
                 url += `&end_node=${endNodeId}`;
             }
+            url += `&filter_dead_ends=${filterDeadEnds}`;
             
             window.location.href = url;
         };

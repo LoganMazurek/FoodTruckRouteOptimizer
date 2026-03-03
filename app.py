@@ -21,6 +21,7 @@ if not secret_key:
     secret_key = os.urandom(24)
 app.secret_key = secret_key
 GRAPH_DIR = os.path.join(os.path.dirname(__file__), "temp")
+NODE_SNAP_DISTANCE_M = 18
 
 # Ensure temp directory exists
 os.makedirs(GRAPH_DIR, exist_ok=True)
@@ -33,6 +34,73 @@ logger = logging.getLogger(__name__)
 
 clat = 0
 clng = 0
+
+
+def validate_boundary_id(boundary_id):
+    """Validate that boundary_id is a valid UUID format."""
+    try:
+        uuid.UUID(boundary_id)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+def consolidate_turn_by_turn(instructions):
+    """
+    Merge consecutive instructions on the same street into a single instruction.
+    Detects turns by tracking when the street name changes.
+    
+    Args:
+        instructions: List of instruction dicts with 'name', 'distance', 'duration'
+    
+    Returns:
+        List of consolidated instructions with proper turn detection ("Turn onto" vs "Start on")
+    """
+    if not instructions:
+        return instructions
+    
+    consolidated = []
+    current_name = None
+    total_distance = 0
+    total_duration = 0
+    
+    for inst in instructions:
+        street_name = inst.get('name', 'unknown')
+        
+        if street_name == current_name:
+            # Same street - accumulate distance and duration
+            total_distance += inst.get('distance', 0)
+            total_duration += inst.get('duration', 0)
+        else:
+            # Street changed - save previous instruction if any
+            if current_name is not None:
+                # Subsequent streets are always "Turn onto"
+                instruction_type = "Turn onto"
+                consolidated.append({
+                    'distance': total_distance,
+                    'duration': total_duration,
+                    'instruction': f'{instruction_type} {current_name}',
+                    'name': current_name
+                })
+            
+            # Start new street
+            current_name = street_name
+            total_distance = inst.get('distance', 0)
+            total_duration = inst.get('duration', 0)
+    
+    # Add the last instruction
+    if current_name is not None:
+        # First instruction gets "Start on", all others "Turn onto"
+        instruction_type = "Start on" if len(consolidated) == 0 else "Turn onto"
+        consolidated.append({
+            'distance': total_distance,
+            'duration': total_duration,
+            'instruction': f'{instruction_type} {current_name}',
+            'name': current_name
+        })
+    
+    logger.debug(f"[CONSOLIDATE] Merged {len(instructions)} turn-by-turn instructions to {len(consolidated)}")
+    return consolidated
 
 
 def validate_boundary_id(boundary_id):
@@ -203,9 +271,17 @@ def process_boundaries():
 
     boundary_id = str(uuid.uuid4())
 
-    nodes, ways = extract_nodes_and_ways(street_data)
+    nodes, ways = extract_nodes_and_ways(
+        street_data,
+        min_lat=min_lat,
+        max_lat=max_lat,
+        min_lng=min_lng,
+        max_lng=max_lng,
+    )
 
-    graph = simplify_graph(nodes, ways)
+    graph = simplify_graph(nodes, ways, settings={
+        'node_snap_distance_m': NODE_SNAP_DISTANCE_M,
+    })
     graph = clean_up_graph(graph)
 
     # Save both the graph and the raw nodes/ways for rebuilding with different settings
@@ -246,6 +322,7 @@ def result():
     # Get route settings
     coverage_mode = request.args.get("coverage_mode", "balanced")
     min_street_length = int(request.args.get("min_street_length", 70))
+    filter_dead_ends = request.args.get("filter_dead_ends", "true").lower() == "true"
     
     try:
         nodes_ways_file_path = get_safe_file_path(boundary_id, "{}_nodes_ways.pkl")
@@ -265,9 +342,11 @@ def result():
     baseline_settings = {
         'coverage_mode': coverage_mode,
         'min_street_length': 0,
+        'node_snap_distance_m': NODE_SNAP_DISTANCE_M,
+        'filter_dead_ends': filter_dead_ends,
     }
 
-    graph = simplify_graph(nodes, ways, settings=baseline_settings)
+    graph = simplify_graph(nodes, ways, settings=baseline_settings, start_node=start_node, end_node=end_node)
     deleted_nodes = load_deleted_nodes(boundary_id)
     if deleted_nodes:
         graph = apply_deleted_nodes_to_graph(graph, deleted_nodes)
@@ -288,11 +367,12 @@ def result():
     )
     
     # Generate 3 different route variants with distinct characteristics
+    # All routes now include all road lengths (0m min) but differ by coverage strategy
     route_variants = []
     speed_priorities = [
-        ('fastest', 'Quick Route', 70),
-        ('balanced', 'Balanced Route', 100),
-        ('thorough', 'Thorough Route', 0)
+        ('fastest', 'Quick Coverage', 0),
+        ('balanced', 'Balanced Coverage', 0),
+        ('thorough', 'Maximum Coverage', 0)
     ]
     
     for priority, name, min_length_for_route in speed_priorities:
@@ -300,7 +380,9 @@ def result():
         route_graph = simplify_graph(nodes, ways, settings={
             'coverage_mode': coverage_mode,
             'min_street_length': min_length_for_route,
-        })
+            'node_snap_distance_m': NODE_SNAP_DISTANCE_M,
+            'filter_dead_ends': filter_dead_ends,
+        }, start_node=start_node, end_node=end_node)
         if deleted_nodes:
             route_graph = apply_deleted_nodes_to_graph(route_graph, deleted_nodes)
         route_graph = clean_up_graph(route_graph)
@@ -315,11 +397,21 @@ def result():
         settings_for_route = {
             'coverage_mode': coverage_mode,
             'min_street_length': min_length_for_route,
-            'speed_priority': priority
+            'speed_priority': priority,
+            'node_snap_distance_m': NODE_SNAP_DISTANCE_M,
         }
         
         logger.info(f"[RESULT] Generating {name} with speed_priority={priority}, min_street_length={min_length_for_route}m")
-        optimized_route = find_route_max_coverage_optimized(route_graph, start_node, end_node, settings=settings_for_route)
+        route_result = find_route_max_coverage_optimized(route_graph, start_node, end_node, settings=settings_for_route)
+        
+        # Handle dict return format with coverage metadata
+        if isinstance(route_result, dict):
+            optimized_route = route_result['route']
+            covered_edge_length_m = route_result.get('covered_edge_length_m', 0)
+        else:
+            # Fallback for old format (shouldn't happen)
+            optimized_route = route_result
+            covered_edge_length_m = 0
         
         def is_latlon_tuple(x):
             return isinstance(x, (list, tuple)) and len(x) == 2 and all(isinstance(i, (float, int)) for i in x)
@@ -336,11 +428,9 @@ def result():
             logger.warning(f"[RESULT] {name} too short after pruning")
             continue
         
-        # Calculate route statistics and track covered edge length
+        # Calculate route statistics for display
         total_distance_m = 0
         turn_by_turn_instructions = []
-        covered_edges = set()
-        covered_edge_length_m = 0
         
         for i in range(len(optimized_route) - 1):
             curr_coord = optimized_route[i]
@@ -361,12 +451,6 @@ def result():
                 street_name = edge_data.get('way_id', 'unnamed road')
                 total_distance_m += distance
                 
-                # Track unique covered edge length (undirected edge)
-                edge_key = tuple(sorted([curr_node, next_node]))
-                if edge_key not in covered_edges:
-                    covered_edges.add(edge_key)
-                    covered_edge_length_m += distance
-                
                 turn_by_turn_instructions.append({
                     'distance': distance,
                     'duration': distance / 8.33,  # ~30 km/h = 8.33 m/s
@@ -374,7 +458,7 @@ def result():
                     'name': street_name
                 })
         
-        # Calculate coverage against baseline graph total edge length
+        # Use coverage metadata from route optimization (already calculated correctly)
         coverage_percent = (
             round((covered_edge_length_m / baseline_total_edge_length_m) * 100, 1)
             if baseline_total_edge_length_m > 0
@@ -397,11 +481,6 @@ def result():
         if coverage_percent > 0:
             description += f" ({coverage_percent}% coverage)"
         
-        if min_length_for_route >= 100:
-            description += f" (roads ≥{min_length_for_route}m)"
-        elif min_length_for_route <= 0:
-            description += " (all road lengths)"
-        
         route_info = {
             'total_distance_km': round(total_distance_m / 1000, 2),
             'total_distance_miles': round(total_distance_m / 1000 * 0.621371, 2),
@@ -416,7 +495,7 @@ def result():
             'description': description,
             'waypoints': pruned_route,
             'geometry': pruned_route,
-            'instructions': turn_by_turn_instructions,
+            'instructions': consolidate_turn_by_turn(turn_by_turn_instructions),
             'route_info': route_info
         })
         
@@ -516,6 +595,7 @@ def visualize_cpp():
     coverage_mode = request.args.get("coverage_mode", "balanced")
     min_street_length = int(request.args.get("min_street_length", 70))
     speed_priority = request.args.get("speed_priority", "balanced")
+    filter_dead_ends = request.args.get("filter_dead_ends", "true").lower() == "true"
     
     if not boundary_id:
         return jsonify({"error": "No boundary ID provided"}), 400
@@ -541,12 +621,14 @@ def visualize_cpp():
     settings = {
         'coverage_mode': coverage_mode,
         'min_street_length': min_street_length,
-        'speed_priority': speed_priority
+        'speed_priority': speed_priority,
+        'node_snap_distance_m': NODE_SNAP_DISTANCE_M,
+        'filter_dead_ends': filter_dead_ends,
     }
-    logger.info(f"[VISUALIZE_CPP] Received settings from request: coverage_mode={coverage_mode}, min_street_length={min_street_length}m, speed_priority={speed_priority}")
+    logger.info(f"[VISUALIZE_CPP] Received settings from request: coverage_mode={coverage_mode}, min_street_length={min_street_length}m, speed_priority={speed_priority}, filter_dead_ends={filter_dead_ends}")
     logger.info(f"[VISUALIZE_CPP] Original data: {len(nodes)} nodes, {len(ways)} ways")
     
-    graph = simplify_graph(nodes, ways, settings=settings)
+    graph = simplify_graph(nodes, ways, settings=settings, start_node=start_node, end_node=end_node)
     deleted_nodes = load_deleted_nodes(boundary_id)
     if deleted_nodes:
         graph = apply_deleted_nodes_to_graph(graph, deleted_nodes)
@@ -561,7 +643,14 @@ def visualize_cpp():
         return jsonify({"error": "Selected end node is not available with current route settings. Please reselect an end node."}), 400
     
     # Use the max coverage optimized algorithm with end_node support and settings
-    route = find_route_max_coverage_optimized(graph, start_node, end_node, settings=settings)
+    route_result = find_route_max_coverage_optimized(graph, start_node, end_node, settings=settings)
+    
+    # Extract route from dict return format
+    if isinstance(route_result, dict):
+        route = route_result['route']
+    else:
+        route = route_result
+    
     logger.info(f"[VISUALIZE_CPP] Generated route with {len(route)} waypoints")
     
     # Prevent browser caching of dynamic route results

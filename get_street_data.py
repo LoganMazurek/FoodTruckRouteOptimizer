@@ -15,21 +15,63 @@ api.headers = {
     'User-Agent': 'FoodTruckRouteOptimizer/1.0 (https://github.com/LoganMazurek/FoodTruckRouteOptimizer)'
 }
 
-def extract_nodes_and_ways(street_data):
-    # Initialize empty lists for nodes and ways
+def _node_within_bbox(lat, lon, min_lat, max_lat, min_lng, max_lng):
+    return min_lat <= lat <= max_lat and min_lng <= lon <= max_lng
+
+
+def _split_contiguous_segments(node_refs, valid_node_ids):
+    segments = []
+    current = []
+
+    for node_id in node_refs:
+        if node_id in valid_node_ids:
+            current.append(node_id)
+        else:
+            if len(current) >= 2:
+                segments.append(current)
+            current = []
+
+    if len(current) >= 2:
+        segments.append(current)
+
+    return segments
+
+
+def extract_nodes_and_ways(street_data, min_lat=None, max_lat=None, min_lng=None, max_lng=None):
+    """
+    Extract nodes and ways from Overpass results.
+
+    When bounds are provided, nodes are strictly clipped to the bounding box and
+    ways are split into contiguous in-bounds segments to prevent out-of-bounds
+    endpoints from leaking into the graph.
+    """
     nodes = {}
     ways = []
 
-    # Extract nodes from the street data
-    for node in street_data.nodes:
-        nodes[node.id] = (float(node.lat), float(node.lon))  # Store nodes with coordinates
+    use_bbox = all(v is not None for v in [min_lat, max_lat, min_lng, max_lng])
 
-    # Extract ways (streets)
+    for node in street_data.nodes:
+        lat = float(node.lat)
+        lon = float(node.lon)
+        if use_bbox and not _node_within_bbox(lat, lon, min_lat, max_lat, min_lng, max_lng):
+            continue
+        nodes[node.id] = (lat, lon)
+
+    valid_node_ids = set(nodes.keys())
+
     for way in street_data.ways:
         street_name = way.tags.get("name")
-        if street_name:
-            node_refs = [n.id for n in way.nodes]  # Get node ids for the street
-            highway_type = way.tags.get("highway", "unclassified")  # Extract highway type for filtering
+        if not street_name:
+            continue
+
+        highway_type = way.tags.get("highway", "unclassified")
+        node_refs = [n.id for n in way.nodes]
+
+        if use_bbox:
+            segments = _split_contiguous_segments(node_refs, valid_node_ids)
+            for segment in segments:
+                ways.append({"name": street_name, "nodes": segment, "highway": highway_type})
+        elif len(node_refs) >= 2:
             ways.append({"name": street_name, "nodes": node_refs, "highway": highway_type})
 
     return nodes, ways

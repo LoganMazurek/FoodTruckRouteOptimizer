@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python
 """Direct coverage test runner - outputs results to console and file."""
 

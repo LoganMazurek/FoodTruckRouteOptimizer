@@ -73,6 +73,110 @@ def haversine(lat1, lon1, lat2, lon2):
 
     return R * c  # Distance in kilometers
 
+
+def merge_nearby_nodes(graph, distance_threshold_m=18, protected_nodes=None):
+    """
+    Merge nodes that are very close together to reduce duplicate/stacked points.
+
+    This helps collapse split carriageway endpoints and near-duplicate geometry
+    nodes that create unnecessary route points.
+    
+    Args:
+        graph: NetworkX graph
+        distance_threshold_m: Minimum distance to treat nodes as separate
+        protected_nodes: Set of node IDs to protect from merging (e.g., start/end nodes)
+    """
+    if graph.number_of_nodes() < 2 or distance_threshold_m <= 0:
+        return graph
+
+    protected_nodes = protected_nodes or set()
+    lat_cell_size = distance_threshold_m / 111320.0
+    if lat_cell_size <= 0:
+        return graph
+
+    buckets = defaultdict(list)
+    coords = {}
+
+    for node_id, data in graph.nodes(data=True):
+        coord = data.get('coordinates')
+        if not coord:
+            continue
+
+        lat, lon = coord
+        coords[node_id] = (lat, lon)
+        lat_idx = int(math.floor(lat / lat_cell_size))
+        lon_idx = int(math.floor(lon / lat_cell_size))
+        buckets[(lat_idx, lon_idx)].append(node_id)
+
+    if len(coords) < 2:
+        return graph
+
+    mapping = {}
+    processed = set()
+
+    for node_id, (lat, lon) in coords.items():
+        if node_id in processed:
+            continue
+
+        lat_idx = int(math.floor(lat / lat_cell_size))
+        lon_idx = int(math.floor(lon / lat_cell_size))
+
+        cluster = [node_id]
+        for d_lat in (-1, 0, 1):
+            for d_lon in (-1, 0, 1):
+                for candidate in buckets.get((lat_idx + d_lat, lon_idx + d_lon), []):
+                    if candidate == node_id or candidate in processed:
+                        continue
+
+                    c_lat, c_lon = coords[candidate]
+                    if haversine(lat, lon, c_lat, c_lon) * 1000 <= distance_threshold_m:
+                        cluster.append(candidate)
+
+        if len(cluster) > 1:
+            # Prefer protected nodes as representative
+            protected_in_cluster = [n for n in cluster if n in protected_nodes]
+            if protected_in_cluster:
+                representative = protected_in_cluster[0]
+            else:
+                representative = max(cluster, key=lambda n: (graph.degree(n), str(n)))
+            for member in cluster:
+                mapping[member] = representative
+            processed.update(cluster)
+        else:
+            processed.add(node_id)
+
+    if not mapping:
+        return graph
+
+    merged = nx.relabel_nodes(graph, mapping, copy=True)
+
+    collapsed = nx.Graph()
+    for node_id, data in merged.nodes(data=True):
+        collapsed.add_node(node_id, **data)
+
+    for u, v, data in merged.edges(data=True):
+        if u == v:
+            continue
+
+        if not collapsed.has_edge(u, v):
+            collapsed.add_edge(u, v, **data)
+            continue
+
+        existing = collapsed[u][v]
+        existing_weight = existing.get('weight', float('inf'))
+        new_weight = data.get('weight', float('inf'))
+        if new_weight < existing_weight:
+            collapsed[u][v].update(data)
+
+    logger.info(
+        f"[MERGE_NODES] threshold={distance_threshold_m}m, "
+        f"before={graph.number_of_nodes()} nodes/{graph.number_of_edges()} edges, "
+        f"after={collapsed.number_of_nodes()} nodes/{collapsed.number_of_edges()} edges"
+    )
+
+    return collapsed
+
+
 def compute_turn_penalty(degrees):
     """
     Compute a penalty based on the angle in degrees.
@@ -109,7 +213,110 @@ def identify_intersections_and_end_nodes(nodes, ways):
         "merged_nodes": merged_nodes,
     }
 
-def simplify_graph(nodes, ways, settings=None):
+def expand_route_with_geometry(route_path, graph):
+    """
+    Expand a simplified route by adding back intermediate nodes from the original geometry.
+    
+    Args:
+        route_path: List of node IDs from the optimized route
+        graph: NetworkX graph with 'intermediate_nodes' (as coordinates) stored on edges
+    
+    Returns:
+        List of (lat, lon) tuples with all intermediate nodes included
+    """
+    if not route_path or len(route_path) < 2:
+        return [(graph.nodes[n]['coordinates'][0], graph.nodes[n]['coordinates'][1]) for n in route_path]
+    
+    expanded_coords = []
+    expanded_coords.append(tuple(graph.nodes[route_path[0]]['coordinates']))
+    
+    for i in range(1, len(route_path)):
+        curr_node = route_path[i - 1]
+        next_node = route_path[i]
+        
+        # Get intermediate node coordinates for this edge
+        if graph.has_edge(curr_node, next_node):
+            edge_data = graph[curr_node][next_node]
+            intermediate_coords = edge_data.get('intermediate_nodes', [])
+            
+            # Add all intermediate node coordinates
+            for coord in intermediate_coords:
+                if coord:  # Skip None/empty entries
+                    expanded_coords.append(tuple(coord))
+        
+        # Add the next endpoint
+        expanded_coords.append(tuple(graph.nodes[next_node]['coordinates']))
+    
+    logger.debug(f"[EXPAND_ROUTE] Expanded route from {len(route_path)} to {len(expanded_coords)} points")
+    return expanded_coords
+
+
+def filter_dead_end_nodes(graph, protected_nodes=None, max_iterations=10):
+    """
+    Iteratively remove dead-end nodes (degree 1) and nodes that form short cul-de-sacs.
+    Also filters out nodes from streets with names indicating courts/cul-de-sacs.
+    
+    Args:
+        graph: NetworkX graph
+        protected_nodes: Set of node IDs to protect from removal (e.g., start/end nodes)
+        max_iterations: Maximum number of pruning passes (default 10)
+    
+    Returns:
+        Filtered graph with dead-ends removed
+    """
+    G = graph.copy()
+    protected_nodes = protected_nodes or set()
+    
+    # Identify court/cul-de-sac names
+    court_keywords = ['court', 'ct', 'cul-de-sac', 'circle', 'cir', 'loop', 'place', 'pl']
+    
+    total_removed = 0
+    iteration = 0
+    
+    for iteration in range(max_iterations):
+        nodes_to_remove = set()
+        
+        for node in list(G.nodes()):
+            # Never remove protected nodes (start/end)
+            if node in protected_nodes:
+                continue
+                
+            degree = G.degree(node)
+            
+            # Remove degree-1 nodes (dead ends)
+            if degree == 1:
+                nodes_to_remove.add(node)
+                continue
+            
+            # Check if node is part of a court/cul-de-sac street
+            if degree <= 2:
+                for neighbor in G.neighbors(node):
+                    if G.has_edge(node, neighbor):
+                        edge_data = G[node][neighbor]
+                        way_name = edge_data.get('way_name', '').lower()
+                        # Check if street name contains court keywords
+                        if any(keyword in way_name for keyword in court_keywords):
+                            nodes_to_remove.add(node)
+                            break
+        
+        if not nodes_to_remove:
+            break
+        
+        G.remove_nodes_from(nodes_to_remove)
+        total_removed += len(nodes_to_remove)
+        
+        # Keep only the largest connected component after removal
+        if G.number_of_nodes() > 0 and not nx.is_connected(G):
+            components = list(nx.connected_components(G))
+            if components:
+                # Prefer the component that contains the most protected nodes
+                best_component = max(components, key=lambda c: sum(1 for n in c if n in protected_nodes))
+                G = G.subgraph(best_component).copy()
+    
+    logger.debug(f"[FILTER_DEAD_ENDS] Removed {total_removed} dead-end/court nodes in {iteration + 1} iterations (protected {len(protected_nodes)} nodes)")
+    return G
+
+def simplify_graph(nodes, ways, settings=None, start_node=None, end_node=None):
     """
     Build a simplified graph from OSM data with configurable coverage settings.
     
@@ -120,13 +327,22 @@ def simplify_graph(nodes, ways, settings=None):
             - coverage_mode: 'balanced', 'maximum', or 'major-roads'
             - min_street_length: Minimum street length in meters (default 50)
             - speed_priority: 'balanced', 'fastest', or 'thorough'
+            - filter_dead_ends: Whether to filter dead-ends (default False)
+        start_node: Optional start node ID to protect from filtering
+        end_node: Optional end node ID to protect from filtering
     """
     settings = settings or {}
     coverage_mode = settings.get('coverage_mode', 'balanced')
     min_length = settings.get('min_street_length', MIN_STREET_LENGTH_METERS)
     speed_priority = settings.get('speed_priority', 'balanced')
-    
-    logger.info(f"[SIMPLIFY_GRAPH] Building graph with: coverage={coverage_mode}, min_length={min_length}m, speed={speed_priority}")
+    node_snap_distance_m = settings.get('node_snap_distance_m', 18)
+    filter_dead_ends = settings.get('filter_dead_ends', False)
+
+    logger.info(
+        f"[SIMPLIFY_GRAPH] Building graph with: coverage={coverage_mode}, "
+        f"min_length={min_length}m, speed={speed_priority}, node_snap={node_snap_distance_m}m, "
+        f"filter_dead_ends={filter_dead_ends}"
+    )
     
     # Determine which road types to exclude based on coverage mode
     if coverage_mode == 'maximum':
@@ -262,13 +478,16 @@ def simplify_graph(nodes, ways, settings=None):
 
                 if node_list[j] in important_nodes:
                     # Add edge between start_node and the current important node
+                    # Store the intermediate node COORDINATES (not IDs) so they survive filtering
+                    intermediate_coords = [(nodes[nid][0], nodes[nid][1]) for nid in path[1:-1]]
                     simplified_graph.add_edge(
                         start_node,
                         node_list[j],
                         distance=total_distance,
                         weight=total_distance,
                         way_id=way_id,
-                        way_length=total_way_length  # Store full way length for debugging
+                        way_length=total_way_length,  # Store full way length for debugging
+                        intermediate_nodes=intermediate_coords  # Store coordinates, not node IDs
                     )
                     edges_added += 1
                     break
@@ -277,9 +496,72 @@ def simplify_graph(nodes, ways, settings=None):
 
     logger.info(f"[SIMPLIFY_GRAPH] Graph building: {ways_filtered_by_type_in_graph} ways filtered by type, {ways_filtered_by_length_in_graph} by length, {edges_added} edges added")
 
-    # Retain only the largest connected component
-    largest_cc = max(nx.connected_components(simplified_graph), key=len)
+    if simplified_graph.number_of_nodes() == 0:
+        logger.warning("[SIMPLIFY_GRAPH] Empty graph after filtering")
+        return simplified_graph
+
+    # Prepare set of nodes to protect from merging (start and end nodes)
+    protected_for_merge = set()
+    if start_node is not None and start_node in simplified_graph:
+        protected_for_merge.add(start_node)
+    if end_node is not None and end_node in simplified_graph:
+        protected_for_merge.add(end_node)
+
+    simplified_graph = merge_nearby_nodes(
+        simplified_graph,
+        distance_threshold_m=node_snap_distance_m,
+        protected_nodes=protected_for_merge
+    )
+
+    if simplified_graph.number_of_nodes() == 0:
+        logger.warning("[SIMPLIFY_GRAPH] Empty graph after node merge")
+        return simplified_graph
+
+    # Retain the connected component containing the start node (required)
+    # If end_node is specified, prefer component containing both start and end
+    components = list(nx.connected_components(simplified_graph))
+    
+    if start_node not in simplified_graph:
+        logger.warning(f"[SIMPLIFY_GRAPH] Start node {start_node} not in graph after merging")
+        # Fallback to largest component
+        largest_cc = max(components, key=len)
+    elif end_node and end_node in simplified_graph:
+        # Both start and end exist - prefer component with both
+        for component in components:
+            if start_node in component and end_node in component:
+                largest_cc = component
+                break
+        else:
+            # Couldn't find component with both - use component with start
+            for component in components:
+                if start_node in component:
+                    largest_cc = component
+                    break
+    else:
+        # Only start_node matters
+        for component in components:
+            if start_node in component:
+                largest_cc = component
+                break
+    
     simplified_graph = simplified_graph.subgraph(largest_cc).copy()
+
+    # Optional: Filter out dead-ends and cul-de-sacs
+    if filter_dead_ends:
+        nodes_before = simplified_graph.number_of_nodes()
+        edges_before = simplified_graph.number_of_edges()
+        
+        # Protect start and end nodes from filtering
+        protected = set()
+        if start_node is not None and start_node in simplified_graph:
+            protected.add(start_node)
+        if end_node is not None and end_node in simplified_graph:
+            protected.add(end_node)
+        
+        simplified_graph = filter_dead_end_nodes(simplified_graph, protected_nodes=protected)
+        nodes_removed = nodes_before - simplified_graph.number_of_nodes()
+        edges_removed = edges_before - simplified_graph.number_of_edges()
+        logger.info(f"[FILTER_DEAD_ENDS] Removed {nodes_removed} dead-end nodes and {edges_removed} edges (protected {len(protected)} nodes)")
 
     # Validate: check for any edges from streets shorter than min_length
     edge_lengths = [data.get('way_length', 0) for u, v, data in simplified_graph.edges(data=True)]
@@ -349,7 +631,9 @@ def find_route_tsp(graph):
             lat, lon = G.nodes[node]['coordinates']
             coordinates_route.append((lat, lon))
 
-        return coordinates_route
+        # Expand route with intermediate nodes for better geometry detail
+        expanded_route = expand_route_with_geometry(optimized_route, G)
+        return expanded_route
     else:
         logger.error("No route found")
         return None
@@ -502,6 +786,151 @@ def filter_turns(route, threshold_degrees=70, way_ids=None, min_distance_meters=
     filtered.append(route[-1])
     return filtered
 
+def find_route_drive_efficient(graph, start_node, end_node, max_iterations=None):
+    """
+    Efficient driving route that prioritizes coverage with natural driving patterns.
+    
+    Rules (strictly enforced):
+    - Each road can be backtracked on AT MOST once (so max 2 traversals total)
+    - Only turn around (U-turn) if going to a cul-de-sac or court that helps coverage
+    - Always prefer direction towards end node over towards start node
+    - Maximize coverage subject to these constraints
+    
+    Args:
+        graph: NetworkX graph
+        start_node: Starting node
+        end_node: Ending node
+        max_iterations: Optional iteration limit
+    
+    Returns:
+        List of node IDs representing the route
+    """
+    G = graph.copy()
+    
+    if start_node not in G or end_node not in G:
+        logger.warning(f"[DRIVE_EFFICIENT] Start or end node not in graph")
+        return [start_node] if start_node in G else []
+    
+    path = [start_node]
+    used_edges = set()
+    backtracked_edges = set()  # Edges we've already backtracked on
+    edge_usage_count = defaultdict(int)
+    current_node = start_node
+    
+    total_edges = set(frozenset(e) for e in G.edges())
+    total_edge_count = len(total_edges)
+    
+    if max_iterations is None:
+        max_iterations = total_edge_count * 8
+    
+    intersections = {n for n in G.nodes if G.degree(n) >= 3}
+    
+    iteration = 0
+    while iteration < max_iterations and current_node != end_node:
+        iteration += 1
+        neighbors = list(G.neighbors(current_node))
+        if not neighbors:
+            break
+        
+        # Categorize neighbors
+        unexplored = []
+        cul_de_sac = []
+        backtrackable = []
+        
+        for neighbor in neighbors:
+            edge = frozenset([current_node, neighbor])
+            usage = edge_usage_count[edge]
+            
+            # Rule: Can't use an edge more than twice
+            if usage >= 2:
+                continue
+            
+            # Is this edge unexplored?
+            if usage == 0:
+                unexplored.append((neighbor, False))
+            else:
+                # This is a backtrack candidate
+                # Check if neighbor is a cul-de-sac or court (degree 1)
+                if G.degree(neighbor) == 1:
+                    cul_de_sac.append((neighbor, True))
+                else:
+                    # Regular backtrack only if not already backtracked
+                    if edge not in backtracked_edges:
+                        backtrackable.append((neighbor, True))
+        
+        # Priority 1: Unexplored edges towards the end (lower distance to end = better)
+        if unexplored:
+            end_coords = G.nodes[end_node]['coordinates']
+            unexplored.sort(key=lambda x: haversine(
+                G.nodes[x[0]]['coordinates'][0], G.nodes[x[0]]['coordinates'][1],
+                end_coords[0], end_coords[1]
+            ))
+            next_node, is_backtrack = unexplored[0]
+        
+        # Priority 2: Cul-de-sacs and courts (they help coverage with U-turn allowed)
+        elif cul_de_sac:
+            next_node, is_backtrack = cul_de_sac[0]
+        
+        # Priority 3: Backtrackable roads (limited to once per road)
+        elif backtrackable:
+            next_node, is_backtrack = backtrackable[0]
+        
+        # No valid moves
+        else:
+            logger.debug(f"[DRIVE_EFFICIENT] No valid moves from node {current_node} at iteration {iteration}/{max_iterations}")
+            break
+        
+        edge = frozenset([current_node, next_node])
+        path.append(next_node)
+        used_edges.add(edge)
+        edge_usage_count[edge] += 1
+        
+        # Mark as backtracked if this is a second traversal
+        if is_backtrack and edge_usage_count[edge] == 2:
+            backtracked_edges.add(edge)
+        
+        current_node = next_node
+    
+    # Navigate to end node if not there
+    if current_node != end_node:
+        try:
+            shortest_path = nx.shortest_path(G, current_node, end_node)
+            path.extend(shortest_path[1:])
+            current_node = end_node
+        except nx.NetworkXNoPath:
+            logger.debug(f"[DRIVE_EFFICIENT] No path to end node from {current_node}")
+    
+    coverage_pct = len(used_edges) / total_edge_count
+    
+    # Calculate covered edge length
+    total_edge_length = sum(G[u][v].get('distance', 0) for u, v in G.edges())
+    covered_edge_length = 0
+    for edge in used_edges:
+        edge_tuple = tuple(edge)
+        if len(edge_tuple) == 2:
+            u, v = edge_tuple
+            if G.has_edge(u, v):
+                covered_edge_length += G[u][v].get('distance', 0)
+    
+    logger.debug(
+        f"[DRIVE_EFFICIENT] Route complete: {len(path)} nodes, {len(used_edges)}/{total_edge_count} edges ({coverage_pct*100:.1f}%), "
+        f"iterations {iteration}/{max_iterations}"
+    )
+    
+    # Expand with intermediate nodes
+    expanded_route = expand_route_with_geometry(path, G)
+    
+    # Return route with coverage metadata
+    return {
+        'route': expanded_route,
+        'path': path,  # Simplified node IDs for edge calculations
+        'covered_edge_length_m': covered_edge_length,
+        'total_edge_length_m': total_edge_length,
+        'covered_edge_count': len(used_edges),
+        'total_edge_count': total_edge_count
+    }
+
+
 def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_uturns=True, settings=None):
     """
     Max-coverage variant with U-turn penalty at intersections (degree 3+).
@@ -521,6 +950,10 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     """
     settings = settings or {}
     speed_priority = settings.get('speed_priority', 'balanced')
+    
+    # For fastest speed priority, use the efficient driving algorithm
+    if speed_priority == 'fastest':
+        return find_route_drive_efficient(graph, start_node, end_node or start_node)
     
     import time
     G = graph.copy()
@@ -543,45 +976,52 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
 
     # Distinct route profiles so each option has a clear, visible impact.
     # Lower score is better.
+    # Key differences:
+    # - fastest: Strongly prefers shorter segments and avoids backtracking (efficiency focused)
+    # - balanced: Moderate exploration, balances coverage and efficiency  
+    # - thorough: Strongly prefers frontier exploration for maximum coverage
     speed_profiles = {
         'fastest': {
-            'coverage_threshold': 0.28,
+            'coverage_threshold': 0.50,  # Exit at 50% coverage
             'max_edge_reuse': 2,
-            'reuse_penalty': 120.0,
-            'used_edge_penalty': 60.0,
-            'unused_bonus': 9.0,
-            'frontier_bonus': 3.5,
-            'backtrack_penalty': 80.0,
-            'uturn_penalty': 25.0,
-            'edge_length_weight': 0.15,
-            'end_pull_start': 0.25,
-            'end_pull_weight': 0.20,
+            'reuse_penalty': 200.0,  # Much higher - strongly avoid reuse
+            'used_edge_penalty': 120.0,  # Much higher - strongly avoid used edges
+            'unused_bonus': 3.0,  # Lower - less drive to find new edges
+            'frontier_bonus': 1.0,  # Lower - less frontier exploration
+            'backtrack_penalty': 150.0,  # Much higher - strongly avoid backtracking
+            'uturn_penalty': 50.0,  # Higher - avoid U-turns
+            'edge_length_weight': 0.4,  # Much higher - strongly prefer shorter edges
+            'end_pull_start': 0.40,  # Pull toward end earlier
+            'end_pull_weight': 0.50,  # Strong pull to end node
+            'allow_early_end_exit': True,
         },
         'balanced': {
-            'coverage_threshold': 0.71,
-            'max_edge_reuse': 2,
-            'reuse_penalty': 135.0,
-            'used_edge_penalty': 68.0,
-            'unused_bonus': 3.8,
-            'frontier_bonus': 1.3,
-            'backtrack_penalty': 65.0,
-            'uturn_penalty': 22.0,
-            'edge_length_weight': 0.08,
-            'end_pull_start': 0.65,
-            'end_pull_weight': 0.04,
+            'coverage_threshold': 0.85,  # Target ~85-90% coverage
+            'max_edge_reuse': 3,  # Increased from 2 to allow more backtracking
+            'reuse_penalty': 80.0,  # Reduced to allow more reuse
+            'used_edge_penalty': 40.0,
+            'unused_bonus': 25.0,  # Increased preference for new edges
+            'frontier_bonus': 12.0,  # Increased frontier exploration
+            'backtrack_penalty': 50.0,
+            'uturn_penalty': 18.0,
+            'edge_length_weight': 0.03,
+            'end_pull_start': 0.75,
+            'end_pull_weight': 0.03,
+            'allow_early_end_exit': False,  # Must reach 85% target before stopping at end node
         },
         'thorough': {
-            'coverage_threshold': 0.945,
-            'max_edge_reuse': 3,
-            'reuse_penalty': 40.0,
-            'used_edge_penalty': 15.0,
-            'unused_bonus': 85.0,
-            'frontier_bonus': 65.0,
-            'backtrack_penalty': 10.0,
-            'uturn_penalty': 3.0,
-            'edge_length_weight': 0.0,
+            'coverage_threshold': 0.97,  # Target ~97-100% coverage
+            'max_edge_reuse': 4,  # Increased from 3 to allow maximum backtracking
+            'reuse_penalty': 20.0,  # Very low penalty for reuse
+            'used_edge_penalty': 5.0,  # Minimal penalty for used edges
+            'unused_bonus': 150.0,  # Huge preference for new edges
+            'frontier_bonus': 120.0,  # Huge preference for frontier areas
+            'backtrack_penalty': 3.0,  # Almost no penalty for backtracking
+            'uturn_penalty': 1.0,  # Almost no U-turn penalty
+            'edge_length_weight': -0.08,  # Stronger preference for longer edges
             'end_pull_start': 0.99,
-            'end_pull_weight': 0.001,
+            'end_pull_weight': 0.0005,  # Almost ignore end node until target met
+            'allow_early_end_exit': False,  # Must reach coverage target before stopping
         },
     }
     profile = speed_profiles.get(speed_priority, speed_profiles['balanced'])
@@ -602,12 +1042,13 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     
     # Greedy traversal with U-turn penalty
     # Increase iteration budget for more thorough exploration
+    # Higher max_edge_reuse requires proportionally more iterations
     if speed_priority == 'fastest':
-        max_iterations = len(total_edges)
+        max_iterations = len(total_edges) * 3  # Quick exit, moderate budget
     elif speed_priority == 'balanced':
-        max_iterations = len(total_edges) * 2
+        max_iterations = len(total_edges) * 6  # Must reach 85%, generous budget
     else:  # thorough
-        max_iterations = len(total_edges) * 5
+        max_iterations = len(total_edges) * 12  # Maximum coverage, very generous budget
     
     iteration = 0
     reached_end_node = False
@@ -621,9 +1062,16 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         # Check if we're at the end node with good coverage
         if end_node and current_node == end_node:
             coverage_pct = len(used_edges) / len(total_edges)
-            if coverage_pct >= COVERAGE_THRESHOLD or iteration > len(total_edges):
+            # For profiles that allow early exit (fastest/balanced), can stop at end node
+            # For thorough, must reach coverage target before stopping
+            should_stop = coverage_pct >= COVERAGE_THRESHOLD
+            if not should_stop and profile.get('allow_early_end_exit', False):
+                # Allow early exit if we've done a reasonable amount of exploration
+                should_stop = iteration > max(100, len(total_edges))
+            
+            if should_stop:
                 reached_end_node = True
-                logger.debug(f"[FIND_ROUTE] Reached end node with {coverage_pct*100:.1f}% coverage")
+                logger.debug(f"[FIND_ROUTE] Reached end node with {coverage_pct*100:.1f}% edge coverage (by count)")
                 break
         
         best_candidate = None
@@ -704,9 +1152,29 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
                 best_candidate = n
         
         if best_candidate is None:
-            # No more moves - if we have an end node, try to navigate there
+            # No more good moves available
+            coverage_pct = len(used_edges) / len(total_edges)
+            
+            # Check if we should exit because we've hit our target coverage
+            if end_node and coverage_pct >= COVERAGE_THRESHOLD:
+                # We've hit our coverage target - navigate directly to end node if not there
+                if current_node != end_node:
+                    try:
+                        shortest_path = nx.shortest_path(G, current_node, end_node)
+                        for node in shortest_path[1:]:  # Skip current node
+                            path.append(node)
+                        current_node = node
+                        reached_end_node = True
+                        logger.debug(f"[FIND_ROUTE] Hit coverage target ({coverage_pct*100:.1f}%), navigated to end node")
+                    except nx.NetworkXNoPath:
+                        logger.debug(f"[FIND_ROUTE] Hit coverage target but no path to end node")
+                else:
+                    reached_end_node = True
+                    logger.debug(f"[FIND_ROUTE] Hit coverage target ({coverage_pct*100:.1f}%) at end node")
+                break
+            
+            # If we haven't hit target, try navigating to end node for more exploration
             if end_node and current_node != end_node:
-                # Try to find a path to end node using shortest path
                 try:
                     shortest_path = nx.shortest_path(G, current_node, end_node)
                     for node in shortest_path[1:]:  # Skip current node
@@ -728,24 +1196,73 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         prev = current_node
         current_node = best_candidate
         
-        # Early exit if coverage good enough and at end node (or no end node specified)
+        # Check for early exit when we hit coverage threshold
         coverage_pct = len(used_edges) / len(total_edges)
-        min_iterations_required = max(10, int(max_iterations * 0.2))  # At least 20% of max_iterations or 10 iterations
+        min_iterations_required = max(10, int(max_iterations * 0.15))  # At least 15% of max_iterations or 10 iterations
+        
         if coverage_pct >= COVERAGE_THRESHOLD and iteration > min_iterations_required:
-            if end_node is None or current_node == end_node:
+            # Coverage target met - if we have an end node, navigate there; otherwise done
+            if end_node:
+                if current_node == end_node:
+                    # Already at end node
+                    logger.debug(f"[FIND_ROUTE] Hit coverage target ({coverage_pct*100:.1f}%) at end node")
+                    break
+                else:
+                    # Navigate to end node (direct jump, not exploration)
+                    try:
+                        shortest_path = nx.shortest_path(G, current_node, end_node)
+                        logger.debug(f"[FIND_ROUTE] Hit coverage target ({coverage_pct*100:.1f}%), jumping to end node")
+                        for node in shortest_path[1:]:
+                            path.append(node)
+                        current_node = end_node
+                        reached_end_node = True
+                        break
+                    except nx.NetworkXNoPath:
+                        logger.debug(f"[FIND_ROUTE] Hit coverage target but no path to end node")
+                        break
+            else:
+                # No end node specified - we're done when coverage reached
                 break
     
     elapsed = time.time() - start_time
-    coverage = len(used_edges) / len(total_edges)
+    coverage_by_count = len(used_edges) / len(total_edges)
+    
+    # Also calculate coverage by edge length (what user sees in result page)
+    total_edge_length = sum(G[u][v].get('distance', 0) for u, v in G.edges())
+    covered_edge_length = 0
+    for edge in used_edges:
+        edge_tuple = tuple(edge)
+        if len(edge_tuple) == 2:
+            u, v = edge_tuple
+            if G.has_edge(u, v):
+                covered_edge_length += G[u][v].get('distance', 0)
+    coverage_by_length = covered_edge_length / total_edge_length if total_edge_length > 0 else 0
     
     if end_node:
         end_status = "reached" if reached_end_node or current_node == end_node else "not reached"
-        logger.debug(f"[FIND_ROUTE] max_coverage_optimized: {coverage*100:.1f}% coverage ({len(used_edges)}/{len(total_edges)} edges), end node {end_status}, speed_priority={speed_priority}")
+        logger.debug(
+            f"[FIND_ROUTE] max_coverage_optimized: {coverage_by_count*100:.1f}% by count ({len(used_edges)}/{len(total_edges)} edges), "
+            f"{coverage_by_length*100:.1f}% by length, end node {end_status}, speed_priority={speed_priority}"
+        )
     else:
-        logger.debug(f"[FIND_ROUTE] max_coverage_optimized: {coverage*100:.1f}% coverage ({len(used_edges)}/{len(total_edges)} edges), speed_priority={speed_priority}")
+        logger.debug(
+            f"[FIND_ROUTE] max_coverage_optimized: {coverage_by_count*100:.1f}% by count ({len(used_edges)}/{len(total_edges)} edges), "
+            f"{coverage_by_length*100:.1f}% by length, speed_priority={speed_priority}"
+        )
     
-    coordinates_route = [(G.nodes[n]['coordinates'][0], G.nodes[n]['coordinates'][1]) for n in path]
-    return coordinates_route
+    # Expand route with intermediate nodes for better geometry detail
+    expanded_route = expand_route_with_geometry(path, G)
+    logger.debug(f"[FIND_ROUTE] Final route: {len(path)} simplified points → {len(expanded_route)} detailed points")
+    
+    # Return route with coverage metadata
+    return {
+        'route': expanded_route,
+        'path': path,  # Simplified node IDs for edge calculations
+        'covered_edge_length_m': covered_edge_length,
+        'total_edge_length_m': total_edge_length,
+        'covered_edge_count': len(used_edges),
+        'total_edge_count': len(total_edges)
+    }
 
 
 
@@ -825,13 +1342,15 @@ def find_route_max_coverage(graph, start_node, end_node=None, visualize=False):
         # Fallback: return the longest path found
         route = path
     coordinates_route = [(G.nodes[n]['coordinates'][0], G.nodes[n]['coordinates'][1]) for n in route]
+    # Expand route with intermediate nodes for better geometry detail
+    expanded_route = expand_route_with_geometry(route, G)
     # Convert frozenset in steps to lists for JSON serialization
     if visualize:
         for step in steps:
             if 'used_edges' in step:
                 step['used_edges'] = [list(e) if isinstance(e, frozenset) else e for e in step['used_edges']]
-        return coordinates_route, steps
-    return coordinates_route
+        return expanded_route, steps
+    return expanded_route
 
 def find_route_cpp(graph, start_node=None, max_edge_reuse=2, trim_loops=False, strategy="drive"):
     """
@@ -873,7 +1392,9 @@ def find_route_cpp(graph, start_node=None, max_edge_reuse=2, trim_loops=False, s
         else:
             continue
     coordinates_route = [(G.nodes[n]['coordinates'][0], G.nodes[n]['coordinates'][1]) for n in filtered_path]
-    return coordinates_route
+    # Expand route with intermediate nodes for better geometry detail
+    expanded_route = expand_route_with_geometry(filtered_path, G)
+    return expanded_route
 
 def convert_frozensets(obj):
     if isinstance(obj, frozenset):
@@ -1001,8 +1522,9 @@ def find_route_drive_preferential(graph, start_node, max_edge_reuse=2, coverage_
     if path and path[-1] != start_node:
         path.append(start_node)
 
-    coordinates_route = [(G.nodes[n]['coordinates'][0], G.nodes[n]['coordinates'][1]) for n in path]
-    return coordinates_route
+    # Expand route with intermediate nodes for better geometry detail
+    expanded_route = expand_route_with_geometry(path, G)
+    return expanded_route
 
 def prune_common_sense_nodes(route, way_ids=None, angle_threshold=30, graph=None):
     """
