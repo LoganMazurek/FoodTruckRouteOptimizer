@@ -1,23 +1,76 @@
 import requests
 import os
 import logging
-import overpy
 import time
+from types import SimpleNamespace
 from osm_cache import cache_exists, get_cached_data, save_to_cache, find_containing_cached_region
 
 # Configure logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configure Overpass API with proper headers to avoid request denied errors
-api = overpy.Overpass()
-# Set a custom user agent to identify the application properly
-api.headers = {
-    'User-Agent': 'FoodTruckRouteOptimizer/1.0 (https://github.com/LoganMazurek/FoodTruckRouteOptimizer)'
-}
+USER_AGENT = 'FoodTruckRouteOptimizer/1.0 (https://github.com/LoganMazurek/FoodTruckRouteOptimizer)'
+OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+]
 
 def _node_within_bbox(lat, lon, min_lat, max_lat, min_lng, max_lng):
     return min_lat <= lat <= max_lat and min_lng <= lon <= max_lng
+
+
+def _create_overpass_result_from_json(overpass_json):
+    """Convert Overpass JSON payload to a minimal object API used by this app."""
+    elements = overpass_json.get("elements", [])
+
+    nodes = {}
+    ways = []
+
+    for element in elements:
+        element_type = element.get("type")
+        if element_type == "node":
+            node_id = element.get("id")
+            lat = element.get("lat")
+            lon = element.get("lon")
+            if node_id is None or lat is None or lon is None:
+                continue
+            nodes[node_id] = SimpleNamespace(id=node_id, lat=lat, lon=lon)
+        elif element_type == "way":
+            node_refs = element.get("nodes", [])
+            tags = element.get("tags", {})
+            way = SimpleNamespace(
+                id=element.get("id"),
+                tags=tags,
+                nodes=[SimpleNamespace(id=node_id) for node_id in node_refs],
+            )
+            ways.append(way)
+
+    return SimpleNamespace(nodes=list(nodes.values()), ways=ways)
+
+
+def _query_overpass_endpoint(query, endpoint, timeout_seconds=60):
+    """Execute an Overpass query against one endpoint and parse JSON response."""
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/json",
+    }
+    response = requests.post(
+        endpoint,
+        data={"data": query},
+        headers=headers,
+        timeout=timeout_seconds,
+    )
+
+    response.raise_for_status()
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        logger.error("Invalid JSON from Overpass endpoint %s", endpoint)
+        raise RuntimeError("Overpass endpoint returned non-JSON response") from exc
+
+    return _create_overpass_result_from_json(payload)
 
 
 def _split_contiguous_segments(node_refs, valid_node_ids):
@@ -91,7 +144,7 @@ def get_coordinates(zipcode):
         'countrycodes': 'us'  # Adjust if you need other countries
     }
     headers = {
-        'User-Agent': 'FoodTruckRouteOptimizer/1.0 (https://github.com/LoganMazurek/FoodTruckRouteOptimizer)'
+        'User-Agent': USER_AGENT
     }
     
     try:
@@ -126,30 +179,49 @@ def make_request_with_retry(query, retries=3, backoff_factor=1):
     """
     attempt = 0
     while attempt < retries:
-        try:
-            # Attempt to make the request
-            logger.info(f"Attempting Overpass API request (attempt {attempt + 1}/{retries})")
-            result = api.query(query)
-            if result:
-                logger.info(f"Overpass API request successful on attempt {attempt + 1}")
-                return result
-            else:
-                logger.warning(f"Empty result on attempt {attempt + 1}")
-        except overpy.exception.OverpassTooManyRequests as e:
-            logger.error(f"Rate limited by Overpass API on attempt {attempt + 1}: {e}")
-        except overpy.exception.OverpassGatewayTimeout as e:
-            logger.error(f"Overpass API timeout on attempt {attempt + 1}: {e}")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed on attempt {attempt + 1}: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error on attempt {attempt + 1}: {e}")
-        
+        logger.info(f"Attempting Overpass API request (attempt {attempt + 1}/{retries})")
+        last_error = None
+
+        for endpoint in OVERPASS_ENDPOINTS:
+            try:
+                result = _query_overpass_endpoint(query, endpoint)
+                if result:
+                    logger.info(
+                        "Overpass API request successful on attempt %s via %s",
+                        attempt + 1,
+                        endpoint,
+                    )
+                    return result
+                logger.warning("Empty result on attempt %s via %s", attempt + 1, endpoint)
+            except requests.exceptions.Timeout as e:
+                last_error = e
+                logger.error("Overpass timeout on attempt %s via %s: %s", attempt + 1, endpoint, e)
+            except requests.exceptions.HTTPError as e:
+                last_error = e
+                status_code = e.response.status_code if e.response is not None else "unknown"
+                logger.error(
+                    "Overpass HTTP error on attempt %s via %s (status=%s): %s",
+                    attempt + 1,
+                    endpoint,
+                    status_code,
+                    e,
+                )
+            except requests.exceptions.RequestException as e:
+                last_error = e
+                logger.error("Overpass request failed on attempt %s via %s: %s", attempt + 1, endpoint, e)
+            except Exception as e:
+                last_error = e
+                logger.error("Unexpected Overpass error on attempt %s via %s: %s", attempt + 1, endpoint, e)
+
         # Exponential backoff (don't sleep after the last failed attempt)
         attempt += 1
         if attempt < retries:
-            delay = backoff_factor * (2 ** attempt)  # Exponential backoff
+            delay = backoff_factor * (2 ** attempt)
             logger.info(f"Retrying in {delay} seconds...")
             time.sleep(delay)
+
+        if last_error:
+            logger.debug("Last Overpass error in attempt %s: %s", attempt, last_error)
     
     logger.error("All retry attempts failed.")
     return None
@@ -187,8 +259,9 @@ def fetch_overpass_data(min_lat, max_lat, min_lng, max_lng, debug=False, use_cac
     
     # Query not in cache, fetch from API
     query = f"""
+    [out:json][timeout:60];
     (
-      way["highway"~"^(primary|secondary|tertiary|residential)"]({min_lat},{min_lng},{max_lat},{max_lng});
+        way["highway"~"^(primary|secondary|tertiary|residential)"]({min_lat},{min_lng},{max_lat},{max_lng});
     );
     (._;>;);
     out body;
