@@ -9,6 +9,7 @@ import networkx as nx
 from build_urls import get_google_maps_url
 from find_route import clean_up_graph, find_route_cpp, find_route_max_coverage_optimized, simplify_graph, prune_common_sense_nodes
 from get_street_data import extract_nodes_and_ways, fetch_overpass_data, get_coordinates
+from utils import cleanup_old_temp_files
 
 app = Flask(__name__)
 # Use environment variable for secret key
@@ -21,6 +22,9 @@ if not secret_key:
 app.secret_key = secret_key
 GRAPH_DIR = os.path.join(os.path.dirname(__file__), "temp")
 NODE_SNAP_DISTANCE_M = 18
+# Per-session pickles in temp/ have no expiry; reclaim abandoned ones older than
+# this (hours). Override with TEMP_FILE_MAX_AGE_HOURS in the environment.
+TEMP_FILE_MAX_AGE_HOURS = int(os.environ.get("TEMP_FILE_MAX_AGE_HOURS", "24"))
 
 # Ensure temp directory exists
 os.makedirs(GRAPH_DIR, exist_ok=True)
@@ -260,6 +264,9 @@ def process_boundaries():
     logger.debug(f"Street and intersection data: {street_data}")
 
     boundary_id = str(uuid.uuid4())
+
+    # A new session is starting: prune state left behind by abandoned sessions.
+    cleanup_old_temp_files(GRAPH_DIR, max_age_hours=TEMP_FILE_MAX_AGE_HOURS)
 
     nodes, ways = extract_nodes_and_ways(
         street_data,
