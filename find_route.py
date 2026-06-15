@@ -1,14 +1,11 @@
 from collections import defaultdict
 import itertools
 import math
-from matplotlib import pyplot as plt
 import networkx as nx
 import logging
 from geopy.distance import geodesic
 import re
 import time
-
-from visualization import selected_start_node
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
