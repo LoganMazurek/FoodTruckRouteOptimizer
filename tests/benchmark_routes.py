@@ -87,7 +87,42 @@ def organic():
     return "organic 4x4", nodes, ways, nid(0, 0)
 
 
-NEIGHBORHOODS = [grid_clean, grid_with_culdesacs, organic]
+def barbell():
+    """Two grids joined by a single long bridge street -- easy for a greedy
+    walk to finish one side and strand the far side."""
+    nodes, ways, nid = _grid(3, 3, lat0=41.78, lon0=-88.24)
+    # Second cluster, offset east.
+    off = 5000
+    for r in range(3):
+        for c in range(3):
+            nodes[off + nid(r, c)] = (41.78 + r * 0.0009, -88.24 + (c + 6) * 0.0011)
+    for r in range(3):
+        ways.append({"name": f"E Cross {r}", "highway": "residential",
+                     "nodes": [off + nid(r, c) for c in range(3)]})
+    for c in range(3):
+        ways.append({"name": f"E Avenue {c}", "highway": "residential",
+                     "nodes": [off + nid(r, c) for r in range(3)]})
+    # Bridge between the two clusters.
+    ways.append({"name": "Bridge Road", "highway": "residential",
+                 "nodes": [nid(1, 2), off + nid(1, 0)]})
+    return "barbell", nodes, ways, nid(0, 0)
+
+
+def comb():
+    """A long spine with many dead-end teeth (lots of forced out-and-backs)."""
+    nodes, ways = {}, []
+    for i in range(9):
+        nodes[i] = (41.78, -88.24 + i * 0.0011)
+    ways.append({"name": "Spine Road", "highway": "residential", "nodes": list(range(9))})
+    tip = 7000
+    for i in range(1, 8):
+        nodes[tip] = (41.78 + 0.0010, -88.24 + i * 0.0011)
+        ways.append({"name": f"Tooth {i}", "highway": "residential", "nodes": [i, tip]})
+        tip += 1
+    return "comb", nodes, ways, 0
+
+
+NEIGHBORHOODS = [grid_clean, grid_with_culdesacs, organic, barbell, comb]
 
 
 def build_graph(nodes, ways, start):
@@ -98,10 +133,11 @@ def build_graph(nodes, ways, start):
 # --------------------------------------------------------------------------- #
 # Route algorithms under test: fn(graph, start) -> list[node_id] (a path)
 # --------------------------------------------------------------------------- #
-def _profile(priority):
+def _profile(priority, **knobs):
     def run(graph, start):
         res = find_route_max_coverage_optimized(
-            graph, start, start, settings={**SETTINGS_BASE, "speed_priority": priority})
+            graph, start, start,
+            settings={**SETTINGS_BASE, "speed_priority": priority, **knobs})
         return res.get("path", []) if isinstance(res, dict) else []
     return run
 
@@ -127,8 +163,14 @@ ALGORITHMS = [
     ("cur:fastest", _profile("fastest")),
     ("cur:balanced", _profile("balanced")),
     ("cur:thorough", _profile("thorough")),
+    # B/C/D knobs on the balanced greedy route (default-off in production):
+    ("bal+straight(B)", _profile("balanced", straight_bonus=15.0)),
+    ("bal+recover(C)", _profile("balanced", stuck_recovery=True)),
+    ("bal+bylength(D)", _profile("balanced", coverage_by_length=True)),
+    ("bal+B+C+D", _profile("balanced", straight_bonus=15.0,
+                           stuck_recovery=True, coverage_by_length=True)),
     ("eulerian/cpp", _eulerian),
-    ("euler-drivable", _euler_drivable),
+    ("euler-drivable(A)", _euler_drivable),
 ]
 
 

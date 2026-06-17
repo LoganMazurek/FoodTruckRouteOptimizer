@@ -1093,6 +1093,29 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     }
     profile = speed_profiles.get(speed_priority, speed_profiles['balanced'])
 
+    # Experimental, benchmark-tunable knobs. Default off => production behavior is
+    # unchanged; tests/benchmark_routes.py flips these on to compare ideas:
+    #   straight_bonus     - reward continuing roughly straight (drivability)
+    #   stuck_recovery     - when locally exhausted, jump to nearest uncovered
+    #                        edge instead of giving up (fewer missed patches)
+    #   coverage_by_length - measure coverage by street length, not edge count
+    for _knob in ('straight_bonus', 'stuck_recovery', 'coverage_by_length'):
+        if settings.get(_knob) is not None:
+            profile[_knob] = settings[_knob]
+
+    total_edge_length_all = sum(G[u][v].get('distance', 0) for u, v in G.edges())
+
+    def coverage_fraction():
+        """Fraction covered, by edge length if the knob is set, else by count."""
+        if profile.get('coverage_by_length') and total_edge_length_all > 0:
+            covered = 0.0
+            for e in used_edges:
+                a, b = tuple(e)
+                if G.has_edge(a, b):
+                    covered += G[a][b].get('distance', 0)
+            return covered / total_edge_length_all
+        return len(used_edges) / len(total_edges)
+
     COVERAGE_THRESHOLD = profile['coverage_threshold']
     MAX_EDGE_REUSE = profile['max_edge_reuse']
     logger.info(
@@ -1128,7 +1151,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         
         # Check if we're at the end node with good coverage
         if end_node and current_node == end_node:
-            coverage_pct = len(used_edges) / len(total_edges)
+            coverage_pct = coverage_fraction()
             # For profiles that allow early exit (fastest/balanced), can stop at end node
             # For thorough, must reach coverage target before stopping
             should_stop = coverage_pct >= COVERAGE_THRESHOLD
@@ -1180,7 +1203,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
                     if current_node in intersections:
                         is_forced_uturn = True  # Penalize but don't forbid
             
-            coverage_pct = len(used_edges) / len(total_edges)
+            coverage_pct = coverage_fraction()
 
             unused_edges_from_neighbor = sum(
                 1
@@ -1207,6 +1230,17 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
             if is_uturn and is_forced_uturn:
                 score += profile['uturn_penalty']
 
+            # Reward continuing roughly straight through an intersection (the
+            # strongest human preference). Full bonus for a straight-through move,
+            # fading to zero by a ~45 degree turn. Off by default.
+            straight_bonus = profile.get('straight_bonus', 0.0)
+            if straight_bonus and prev is not None:
+                pp = G.nodes[prev]['coordinates']
+                cp = G.nodes[current_node]['coordinates']
+                npt = G.nodes[n]['coordinates']
+                turn_deg = abs((bearing(cp, npt) - bearing(pp, cp) + 540) % 360 - 180)
+                score -= straight_bonus * max(0.0, 1.0 - turn_deg / 45.0)
+
             if end_node and coverage_pct >= COVERAGE_THRESHOLD * profile['end_pull_start']:
                 score += distance_to_end * profile['end_pull_weight']
 
@@ -1220,8 +1254,34 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         
         if best_candidate is None:
             # No more good moves available
-            coverage_pct = len(used_edges) / len(total_edges)
-            
+            coverage_pct = coverage_fraction()
+
+            # Stuck-recovery: rather than giving up here (which strands whole
+            # patches of the neighborhood), relocate to the nearest node that
+            # still touches an uncovered edge and resume. Off by default.
+            if profile.get('stuck_recovery') and coverage_pct < COVERAGE_THRESHOLD:
+                uncovered = total_edges - used_edges
+                targets = set()
+                for e in uncovered:
+                    targets.update(tuple(e))
+                targets.discard(current_node)
+                if targets:
+                    try:
+                        lengths, paths = nx.single_source_dijkstra(G, current_node, weight='weight')
+                        reachable = [(lengths[t], t) for t in targets if t in lengths]
+                        if reachable:
+                            _, tnode = min(reachable)
+                            for node in paths[tnode][1:]:
+                                edge = frozenset([current_node, node])
+                                path.append(node)
+                                used_edges.add(edge)
+                                edge_usage_count[edge] += 1
+                                prev = current_node
+                                current_node = node
+                            continue  # resume exploring from the uncovered area
+                    except (nx.NetworkXNoPath, KeyError):
+                        pass
+
             # Check if we should exit because we've hit our target coverage
             if end_node and coverage_pct >= COVERAGE_THRESHOLD:
                 # We've hit our coverage target - navigate directly to end node if not there
@@ -1264,7 +1324,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         current_node = best_candidate
         
         # Check for early exit when we hit coverage threshold
-        coverage_pct = len(used_edges) / len(total_edges)
+        coverage_pct = coverage_fraction()
         min_iterations_required = max(10, int(max_iterations * 0.15))  # At least 15% of max_iterations or 10 iterations
         
         if coverage_pct >= COVERAGE_THRESHOLD and iteration > min_iterations_required:

@@ -159,3 +159,24 @@ def test_drive_efficient_returns_route_when_start_equals_end():
     res = find_route_drive_efficient(g, 1, 1)
     assert len(res['path']) > 1
     assert res['path'][0] == 1
+
+
+def test_experimental_knobs_produce_valid_routes_and_dont_change_defaults():
+    """The straight_bonus/stuck_recovery/coverage_by_length knobs are opt-in.
+    With them off the route must be identical to passing no knobs, and with them
+    on the route must still be a valid contiguous path."""
+    from find_route import find_route_max_coverage_optimized as route
+
+    g = _square_graph()
+    base = route(g, 1, 1, settings={"speed_priority": "balanced"})
+    same = route(g, 1, 1, settings={"speed_priority": "balanced",
+                                     "straight_bonus": 0.0, "stuck_recovery": False})
+    assert base["path"] == same["path"]  # defaults unchanged
+
+    tuned = route(g, 1, 1, settings={"speed_priority": "balanced",
+                                     "straight_bonus": 15.0,
+                                     "stuck_recovery": True,
+                                     "coverage_by_length": True})
+    p = tuned["path"]
+    assert len(p) > 1
+    assert all(g.has_edge(p[i], p[i + 1]) for i in range(len(p) - 1))
