@@ -404,49 +404,47 @@ def result():
         # Handle dict return format with coverage metadata
         if isinstance(route_result, dict):
             optimized_route = route_result['route']
+            route_path = route_result.get('path', [])
             covered_edge_length_m = route_result.get('covered_edge_length_m', 0)
         else:
             # Fallback for old format (shouldn't happen)
             optimized_route = route_result
+            route_path = []
             covered_edge_length_m = 0
-        
+
         def is_latlon_tuple(x):
             return isinstance(x, (list, tuple)) and len(x) == 2 and all(isinstance(i, (float, int)) for i in x)
-        
+
         if not optimized_route or not is_latlon_tuple(optimized_route[0]):
             logger.warning(f"[RESULT] Failed to generate {name}")
             continue
-        
+
         # Prune route
         way_ids = [None] * len(optimized_route)
         pruned_route = prune_common_sense_nodes(optimized_route, way_ids=way_ids, angle_threshold=30, graph=route_graph)
-        
+
         if len(pruned_route) < 2:
             logger.warning(f"[RESULT] {name} too short after pruning")
             continue
-        
+
         turn_by_turn_instructions = []
         total_distance_m = 0
-        # Build turn-by-turn instructions from graph edges
-        for i in range(len(optimized_route) - 1):
-            curr_coord = optimized_route[i]
-            next_coord = optimized_route[i + 1]
-            
-            # Find the graph edge
-            curr_node = None
-            next_node = None
-            for node, data in route_graph.nodes(data=True):
-                if data.get('coordinates') == curr_coord:
-                    curr_node = node
-                if data.get('coordinates') == next_coord:
-                    next_node = node
-            
-            if curr_node and next_node and route_graph.has_edge(curr_node, next_node):
-                edge_data = route_graph[curr_node][next_node]
+        # Build turn-by-turn instructions and driven distance by walking the
+        # simplified node path. The path is a sequence of adjacent graph nodes,
+        # so every edge (including re-driven ones) is looked up exactly.
+        # NOTE: do NOT derive distance by matching expanded-route coordinates to
+        # node coordinates -- that silently skips every edge carrying intermediate
+        # geometry and collapses the duration toward zero (the "1 minute" bug).
+        for i in range(len(route_path) - 1):
+            u = route_path[i]
+            v = route_path[i + 1]
+
+            if route_graph.has_edge(u, v):
+                edge_data = route_graph[u][v]
                 distance = edge_data.get('distance', 0)
                 street_name = edge_data.get('way_id', 'unnamed road')
                 total_distance_m += distance
-                
+
                 turn_by_turn_instructions.append({
                     'instruction': f'Continue on {street_name}',
                     'name': street_name,

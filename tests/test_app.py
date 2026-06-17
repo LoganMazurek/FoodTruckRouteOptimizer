@@ -160,3 +160,43 @@ def test_export_gpx_falls_back_when_no_track(client):
     resp = client.get(f'/export_gpx?boundary_id={boundary_id}&route_option=balanced')
     assert resp.status_code == 200
     assert resp.data.decode().count('<trkpt') == len(geometry)
+
+
+def test_result_duration_uses_node_path_for_intermediate_heavy_edges(client, mocker):
+    """Duration must be derived from the node path (exact edge lookups), not by
+    matching expanded-route coordinates -- otherwise edges with intermediate
+    geometry are skipped and every route collapses to ~1 minute."""
+    import uuid
+    import networkx as nx
+    boundary_id = str(uuid.uuid4())
+
+    os.makedirs("temp", exist_ok=True)
+    with open(os.path.join("temp", f"{boundary_id}_nodes_ways.pkl"), "wb") as f:
+        pickle.dump({"nodes": {}, "ways": []}, f)
+
+    # Graph whose edges carry real distances; the expanded route has points that
+    # are NOT graph-node coordinates (simulating intermediate geometry), so the
+    # old coordinate-matching path would find 0 distance.
+    g = nx.Graph()
+    g.add_node(1, coordinates=(41.0, -88.0))
+    g.add_node(2, coordinates=(41.0, -88.02))
+    g.add_node(3, coordinates=(41.0, -88.05))
+    g.add_edge(1, 2, distance=2000, way_id="Main Street")
+    g.add_edge(2, 3, distance=3000, way_id="Oak Avenue")
+
+    mocker.patch('app.simplify_graph', return_value=g)
+    mocker.patch('app.clean_up_graph', return_value=g)
+    mocker.patch('app.find_route_max_coverage_optimized', return_value={
+        'route': [(41.0, -88.0), (41.0, -88.01), (41.0, -88.02), (41.0, -88.05)],
+        'path': [1, 2, 3],
+        'covered_edge_length_m': 5000,
+        'total_edge_length_m': 5000,
+        'covered_edge_count': 2,
+        'total_edge_count': 2,
+    })
+    mocker.patch('app.prune_common_sense_nodes', return_value=[(41.0, -88.0), (41.0, -88.05)])
+
+    resp = client.get(f'/result?boundary_id={boundary_id}&start_node=1&end_node=3')
+    assert resp.status_code == 200
+    # 5000 m at 30 km/h = 10 minutes (not the "1 minute" collapse).
+    assert b"10 minutes" in resp.data
