@@ -121,3 +121,41 @@ def test_expand_route_drops_consecutive_duplicate_points():
     assert out == [(0.0, 0.0), (0.0, 0.001), (0.0, 0.002)]
     # No consecutive duplicates anywhere.
     assert all(out[i] != out[i - 1] for i in range(1, len(out)))
+
+
+def _square_graph():
+    """2x2 block grid: 4 nodes, 4 edges, all even degree (Euler circuit exists)."""
+    import networkx as nx
+    g = nx.Graph()
+    coords = {1: (0.0, 0.0), 2: (0.0, 0.001), 3: (0.001, 0.001), 4: (0.001, 0.0)}
+    for n, c in coords.items():
+        g.add_node(n, coordinates=c)
+    for u, v in [(1, 2), (2, 3), (3, 4), (4, 1)]:
+        g.add_edge(u, v, distance=100, weight=100, way_id=f"S{u}{v}")
+    return g
+
+
+def test_eulerian_drivable_covers_all_edges_with_contiguous_path():
+    from find_route import find_route_eulerian_drivable
+    g = _square_graph()
+    res = find_route_eulerian_drivable(g, 1, 1)
+    path = res['path']
+
+    # Every consecutive pair is a real edge (contiguous, drivable path).
+    assert all(g.has_edge(path[i], path[i + 1]) for i in range(len(path) - 1))
+    # Full coverage.
+    assert res['covered_edge_count'] == g.number_of_edges()
+    covered = {frozenset((path[i], path[i + 1])) for i in range(len(path) - 1)}
+    assert covered == {frozenset(e) for e in g.edges()}
+    # Starts at the requested start node.
+    assert path[0] == 1
+
+
+def test_drive_efficient_returns_route_when_start_equals_end():
+    """Quick Coverage (start == end / no explicit end node) must still produce a
+    route, not terminate immediately with an empty path."""
+    from find_route import find_route_drive_efficient
+    g = _square_graph()
+    res = find_route_drive_efficient(g, 1, 1)
+    assert len(res['path']) > 1
+    assert res['path'][0] == 1
