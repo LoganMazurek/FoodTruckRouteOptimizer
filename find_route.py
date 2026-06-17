@@ -856,8 +856,12 @@ def find_route_drive_efficient(graph, start_node, end_node, max_iterations=None)
     end_coords = G_filtered.nodes[end_node]['coordinates']
     iteration = 0
     prev_node = None  # Track previous node for better path selection
-    
-    while iteration < max_iterations and current_node != end_node:
+
+    # NOTE: stop at end_node only AFTER we've actually moved. When start_node ==
+    # end_node (the common "no explicit end / return to start" case) the route
+    # would otherwise terminate immediately with an empty path, silently dropping
+    # the Quick Coverage variant.
+    while iteration < max_iterations and not (current_node == end_node and len(path) > 1):
         iteration += 1
         neighbors = list(G_filtered.neighbors(current_node))
         if not neighbors:
@@ -1089,6 +1093,29 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
     }
     profile = speed_profiles.get(speed_priority, speed_profiles['balanced'])
 
+    # Experimental, benchmark-tunable knobs. Default off => production behavior is
+    # unchanged; tests/benchmark_routes.py flips these on to compare ideas:
+    #   straight_bonus     - reward continuing roughly straight (drivability)
+    #   stuck_recovery     - when locally exhausted, jump to nearest uncovered
+    #                        edge instead of giving up (fewer missed patches)
+    #   coverage_by_length - measure coverage by street length, not edge count
+    for _knob in ('straight_bonus', 'stuck_recovery', 'coverage_by_length'):
+        if settings.get(_knob) is not None:
+            profile[_knob] = settings[_knob]
+
+    total_edge_length_all = sum(G[u][v].get('distance', 0) for u, v in G.edges())
+
+    def coverage_fraction():
+        """Fraction covered, by edge length if the knob is set, else by count."""
+        if profile.get('coverage_by_length') and total_edge_length_all > 0:
+            covered = 0.0
+            for e in used_edges:
+                a, b = tuple(e)
+                if G.has_edge(a, b):
+                    covered += G[a][b].get('distance', 0)
+            return covered / total_edge_length_all
+        return len(used_edges) / len(total_edges)
+
     COVERAGE_THRESHOLD = profile['coverage_threshold']
     MAX_EDGE_REUSE = profile['max_edge_reuse']
     logger.info(
@@ -1124,7 +1151,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         
         # Check if we're at the end node with good coverage
         if end_node and current_node == end_node:
-            coverage_pct = len(used_edges) / len(total_edges)
+            coverage_pct = coverage_fraction()
             # For profiles that allow early exit (fastest/balanced), can stop at end node
             # For thorough, must reach coverage target before stopping
             should_stop = coverage_pct >= COVERAGE_THRESHOLD
@@ -1176,7 +1203,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
                     if current_node in intersections:
                         is_forced_uturn = True  # Penalize but don't forbid
             
-            coverage_pct = len(used_edges) / len(total_edges)
+            coverage_pct = coverage_fraction()
 
             unused_edges_from_neighbor = sum(
                 1
@@ -1203,6 +1230,17 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
             if is_uturn and is_forced_uturn:
                 score += profile['uturn_penalty']
 
+            # Reward continuing roughly straight through an intersection (the
+            # strongest human preference). Full bonus for a straight-through move,
+            # fading to zero by a ~45 degree turn. Off by default.
+            straight_bonus = profile.get('straight_bonus', 0.0)
+            if straight_bonus and prev is not None:
+                pp = G.nodes[prev]['coordinates']
+                cp = G.nodes[current_node]['coordinates']
+                npt = G.nodes[n]['coordinates']
+                turn_deg = abs((bearing(cp, npt) - bearing(pp, cp) + 540) % 360 - 180)
+                score -= straight_bonus * max(0.0, 1.0 - turn_deg / 45.0)
+
             if end_node and coverage_pct >= COVERAGE_THRESHOLD * profile['end_pull_start']:
                 score += distance_to_end * profile['end_pull_weight']
 
@@ -1216,8 +1254,34 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         
         if best_candidate is None:
             # No more good moves available
-            coverage_pct = len(used_edges) / len(total_edges)
-            
+            coverage_pct = coverage_fraction()
+
+            # Stuck-recovery: rather than giving up here (which strands whole
+            # patches of the neighborhood), relocate to the nearest node that
+            # still touches an uncovered edge and resume. Off by default.
+            if profile.get('stuck_recovery') and coverage_pct < COVERAGE_THRESHOLD:
+                uncovered = total_edges - used_edges
+                targets = set()
+                for e in uncovered:
+                    targets.update(tuple(e))
+                targets.discard(current_node)
+                if targets:
+                    try:
+                        lengths, paths = nx.single_source_dijkstra(G, current_node, weight='weight')
+                        reachable = [(lengths[t], t) for t in targets if t in lengths]
+                        if reachable:
+                            _, tnode = min(reachable)
+                            for node in paths[tnode][1:]:
+                                edge = frozenset([current_node, node])
+                                path.append(node)
+                                used_edges.add(edge)
+                                edge_usage_count[edge] += 1
+                                prev = current_node
+                                current_node = node
+                            continue  # resume exploring from the uncovered area
+                    except (nx.NetworkXNoPath, KeyError):
+                        pass
+
             # Check if we should exit because we've hit our target coverage
             if end_node and coverage_pct >= COVERAGE_THRESHOLD:
                 # We've hit our coverage target - navigate directly to end node if not there
@@ -1260,7 +1324,7 @@ def find_route_max_coverage_optimized(graph, start_node, end_node=None, forbid_u
         current_node = best_candidate
         
         # Check for early exit when we hit coverage threshold
-        coverage_pct = len(used_edges) / len(total_edges)
+        coverage_pct = coverage_fraction()
         min_iterations_required = max(10, int(max_iterations * 0.15))  # At least 15% of max_iterations or 10 iterations
         
         if coverage_pct >= COVERAGE_THRESHOLD and iteration > min_iterations_required:
@@ -1414,6 +1478,101 @@ def find_route_max_coverage(graph, start_node, end_node=None, visualize=False):
                 step['used_edges'] = [list(e) if isinstance(e, frozenset) else e for e in step['used_edges']]
         return expanded_route, steps
     return expanded_route
+
+def find_route_eulerian_drivable(graph, start_node, end_node=None, settings=None):
+    """
+    Full-coverage route built on a Chinese-Postman (Eulerian) backbone, but
+    traversed with a straight-through preference for drivability.
+
+    Why: a greedy coverage walk re-drives streets far more than necessary
+    (benchmarks show ~80% overlap for the 'thorough' profile). Eulerizing the
+    graph guarantees 100% coverage with the minimum possible duplicate driving,
+    and choosing the straightest available edge at each step (Hierholzer with a
+    turn-cost tie-break) keeps the sweep human-like instead of zig-zagging
+    between parallel streets.
+
+    Returns the same dict shape as find_route_max_coverage_optimized so it can be
+    dropped into the /result pipeline.
+    """
+    if start_node not in graph:
+        logger.warning(f"[EULER_DRIVE] Start node {start_node} not in graph")
+        return {'route': [], 'path': [], 'covered_edge_length_m': 0,
+                'total_edge_length_m': 0, 'covered_edge_count': 0, 'total_edge_count': 0}
+
+    total_edges = set(frozenset(e) for e in graph.edges())
+    total_edge_length = sum(graph[u][v].get('distance', 0) for u, v in graph.edges())
+    if not total_edges:
+        coord = graph.nodes[start_node]['coordinates']
+        return {'route': [(coord[0], coord[1])], 'path': [start_node],
+                'covered_edge_length_m': 0, 'total_edge_length_m': 0,
+                'covered_edge_count': 0, 'total_edge_count': 0}
+
+    # Eulerize: add the minimum-weight set of duplicate edges so every node has
+    # even degree (a circuit covering every edge exists).
+    g_euler = nx.eulerize(graph.copy())
+
+    # Remaining traversals per undirected edge (parallel duplicates -> count > 1).
+    remaining = defaultdict(int)
+    adjacency = defaultdict(set)
+    for u, v in g_euler.edges():
+        remaining[frozenset((u, v))] += 1
+        adjacency[u].add(v)
+        adjacency[v].add(u)
+
+    coords = {n: graph.nodes[n]['coordinates'] for n in graph.nodes}
+
+    # Hierholzer's algorithm, choosing the straightest unused edge at each step.
+    stack = [(start_node, None)]  # (node, bearing we arrived by)
+    circuit = []
+    while stack:
+        node, arrival_bearing = stack[-1]
+        best = None
+        best_turn = float('inf')
+        for nb in adjacency[node]:
+            if remaining[frozenset((node, nb))] <= 0:
+                continue
+            b = bearing(coords[node], coords[nb])
+            turn = 0.0 if arrival_bearing is None else abs((b - arrival_bearing + 540) % 360 - 180)
+            if turn < best_turn:
+                best_turn = turn
+                best = (nb, b)
+        if best is None:
+            circuit.append(node)
+            stack.pop()
+        else:
+            nb, b = best
+            remaining[frozenset((node, nb))] -= 1
+            stack.append((nb, b))
+
+    circuit.reverse()
+
+    # Rotate so the circuit starts at start_node (it's a closed loop).
+    if circuit and circuit[0] != start_node and start_node in circuit:
+        idx = circuit.index(start_node)
+        circuit = circuit[idx:] + circuit[1:idx + 1]
+
+    covered = set()
+    for i in range(len(circuit) - 1):
+        u, v = circuit[i], circuit[i + 1]
+        if graph.has_edge(u, v):
+            covered.add(frozenset((u, v)))
+    covered_length = sum(graph[list(e)[0]][list(e)[1]].get('distance', 0) for e in covered)
+
+    expanded_route = expand_route_with_geometry(circuit, graph)
+    logger.info(
+        f"[EULER_DRIVE] {len(circuit)} path nodes, "
+        f"{len(covered)}/{len(total_edges)} edges covered, "
+        f"{len(expanded_route)} detailed points"
+    )
+    return {
+        'route': expanded_route,
+        'path': circuit,
+        'covered_edge_length_m': covered_length,
+        'total_edge_length_m': total_edge_length,
+        'covered_edge_count': len(covered),
+        'total_edge_count': len(total_edges),
+    }
+
 
 def find_route_cpp(graph, start_node=None, max_edge_reuse=2, trim_loops=False, strategy="drive"):
     """
