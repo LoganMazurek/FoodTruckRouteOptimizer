@@ -117,6 +117,7 @@ route_data = {
     "description": "test",
     "waypoints": pruned_route,
     "geometry": pruned_route,
+    "track": optimized_route,  # dense road-following geometry for GPX export
     "instructions": instructions,
     "route_info": {"total_distance_miles": 1.23, "total_duration_min": 9.0},
 }
@@ -126,6 +127,8 @@ distance_miles = route_data["route_info"]["total_distance_miles"]
 duration_min = route_data["route_info"]["total_duration_min"]
 route_name = route_data["name"]
 
+track = route_data.get("track") or route_data.get("geometry") or route_data.get("waypoints") or []
+
 gpx = '<?xml version="1.0" encoding="UTF-8"?>\n'
 gpx += '<gpx version="1.1" creator="FoodTruckRouteOptimizer" xmlns="http://www.topografix.com/GPX/1/1">\n'
 gpx += '  <metadata>\n'
@@ -134,31 +137,12 @@ gpx += f'    <desc>Route: {distance_miles} miles, {duration_min:.0f} min. {route
 gpx += f'    <time>{datetime.utcnow().isoformat()}Z</time>\n'
 gpx += '  </metadata>\n'
 
-waypoints = route_data.get("waypoints", [])
-for i, (lat, lon) in enumerate(waypoints):
-    name = 'Start' if i == 0 else ('End' if i == len(waypoints) - 1 else f'Waypoint {i}')
-    gpx += f'  <wpt lat="{lat}" lon="{lon}">\n    <name>{name}</name>\n  </wpt>\n'
-
-geometry = route_data.get("geometry")
-if geometry:
-    gpx += '  <trk>\n'
-    gpx += f'    <name>{route_name}</name>\n'
-    gpx += '    <trkseg>\n'
-    for lat, lon in geometry:
-        gpx += f'      <trkpt lat="{lat}" lon="{lon}"></trkpt>\n'
-    gpx += '    </trkseg>\n  </trk>\n'
-
-if instructions and waypoints:
-    gpx += '  <rte>\n    <name>Turn-by-Turn Route</name>\n'
-    for i, (lat, lon) in enumerate(waypoints):
-        gpx += f'    <rtept lat="{lat}" lon="{lon}">\n'
-        if i < len(instructions):
-            inst = instructions[i]
-            gpx += f'      <name>{inst.get("instruction", "Continue")}</name>\n'
-            if inst.get("name"):
-                gpx += f'      <desc>onto {inst["name"]}</desc>\n'
-        gpx += '    </rtept>\n'
-    gpx += '  </rte>\n'
+gpx += '  <trk>\n'
+gpx += f'    <name>{route_name}</name>\n'
+gpx += '    <trkseg>\n'
+for lat, lon in track:
+    gpx += f'      <trkpt lat="{lat}" lon="{lon}"></trkpt>\n'
+gpx += '    </trkseg>\n  </trk>\n'
 
 gpx += '</gpx>'
 
@@ -166,4 +150,4 @@ out = os.path.join(os.path.dirname(__file__), "sample_route.gpx")
 with open(out, "w") as f:
     f.write(gpx)
 print(f"\nwrote {out}")
-print(f"counts -> wpt:{len(waypoints)}  trkpt:{len(geometry)}  rtept:{len(waypoints)}  rte_names:{len(instructions)}")
+print(f"counts -> dense trkpt:{len(track)}  (vs pruned waypoints:{len(pruned_route)})")

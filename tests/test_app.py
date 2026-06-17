@@ -97,3 +97,66 @@ def test_result_with_street_data(client, mocker):
     response = client.get(f'/result?boundary_id={boundary_id}&start_node=1&end_node=2')
     assert response.status_code == 200
     assert b"result.html" in response.data or b"route_variants" in response.data or len(response.data) > 0
+
+def test_export_gpx_emits_single_dense_track(client):
+    """GPX export should be a single <trk> built from the dense 'track'
+    geometry, with no <wpt> pins and no <rte> block (so OsmAnd treats it as a
+    follow-able track and does not get a misaligned/ambiguous route)."""
+    import uuid
+    boundary_id = str(uuid.uuid4())
+
+    # Dense road-following geometry (what find_route returns expanded) vs the
+    # sparse pruned waypoints used for on-screen display.
+    dense_track = [
+        (41.8781, -87.6298), (41.8786, -87.6295), (41.8790, -87.6291),
+        (41.8795, -87.6288), (41.8790, -87.6291), (41.8786, -87.6295),
+    ]
+    pruned = [(41.8781, -87.6298), (41.8795, -87.6288)]
+
+    route_variants = [{
+        'priority': 'balanced',
+        'name': 'Balanced Route',
+        'description': 'test',
+        'waypoints': pruned,
+        'geometry': pruned,
+        'track': dense_track,
+        'instructions': [{'instruction': 'Start on A', 'name': 'A'}],
+        'route_info': {'total_distance_miles': 1.2, 'total_duration_min': 9},
+    }]
+
+    os.makedirs("temp", exist_ok=True)
+    with open(os.path.join("temp", f"{boundary_id}_routes.pkl"), "wb") as f:
+        pickle.dump(route_variants, f)
+
+    resp = client.get(f'/export_gpx?boundary_id={boundary_id}&route_option=balanced')
+    assert resp.status_code == 200
+    body = resp.data.decode()
+
+    # Well-formed XML.
+    import xml.dom.minidom as minidom
+    minidom.parseString(body)
+
+    # Single track, dense, with no competing wpt/rte structures.
+    assert '<trk>' in body
+    assert '<wpt' not in body
+    assert '<rte>' not in body
+    assert body.count('<trkpt') == len(dense_track)
+
+
+def test_export_gpx_falls_back_when_no_track(client):
+    """Older saved routes without a 'track' key still export using geometry."""
+    import uuid
+    boundary_id = str(uuid.uuid4())
+    geometry = [(41.8781, -87.6298), (41.8795, -87.6288)]
+    route_variants = [{
+        'priority': 'balanced', 'name': 'R', 'description': 't',
+        'waypoints': geometry, 'geometry': geometry, 'instructions': [],
+        'route_info': {'total_distance_miles': 1, 'total_duration_min': 5},
+    }]
+    os.makedirs("temp", exist_ok=True)
+    with open(os.path.join("temp", f"{boundary_id}_routes.pkl"), "wb") as f:
+        pickle.dump(route_variants, f)
+
+    resp = client.get(f'/export_gpx?boundary_id={boundary_id}&route_option=balanced')
+    assert resp.status_code == 200
+    assert resp.data.decode().count('<trkpt') == len(geometry)
