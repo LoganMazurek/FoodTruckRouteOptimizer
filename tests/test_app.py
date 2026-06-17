@@ -200,3 +200,39 @@ def test_result_duration_uses_node_path_for_intermediate_heavy_edges(client, moc
     assert resp.status_code == 200
     # 5000 m at 30 km/h = 10 minutes (not the "1 minute" collapse).
     assert b"10 minutes" in resp.data
+
+
+def test_result_uses_eulerian_for_thorough_loop(client, mocker):
+    """With no end node (return-to-start), the Maximum Coverage variant should be
+    built by the Eulerian route; the other variants use the greedy walk."""
+    import uuid
+    import networkx as nx
+    boundary_id = str(uuid.uuid4())
+
+    os.makedirs("temp", exist_ok=True)
+    with open(os.path.join("temp", f"{boundary_id}_nodes_ways.pkl"), "wb") as f:
+        pickle.dump({"nodes": {}, "ways": []}, f)
+
+    g = nx.Graph()
+    g.add_node(1, coordinates=(41.0, -88.0))
+    g.add_node(2, coordinates=(41.0, -88.02))
+    g.add_node(3, coordinates=(41.0, -88.05))
+    g.add_edge(1, 2, distance=2000, way_id="Main Street")
+    g.add_edge(2, 3, distance=3000, way_id="Oak Avenue")
+
+    result_dict = {
+        'route': [(41.0, -88.0), (41.0, -88.02), (41.0, -88.05)],
+        'path': [1, 2, 3],
+        'covered_edge_length_m': 5000, 'total_edge_length_m': 5000,
+        'covered_edge_count': 2, 'total_edge_count': 2,
+    }
+    mocker.patch('app.simplify_graph', return_value=g)
+    mocker.patch('app.clean_up_graph', return_value=g)
+    greedy = mocker.patch('app.find_route_max_coverage_optimized', return_value=result_dict)
+    euler = mocker.patch('app.find_route_eulerian_drivable', return_value=result_dict)
+    mocker.patch('app.prune_common_sense_nodes', return_value=[(41.0, -88.0), (41.0, -88.05)])
+
+    resp = client.get(f'/result?boundary_id={boundary_id}&start_node=1')  # no end_node
+    assert resp.status_code == 200
+    euler.assert_called_once()                 # thorough -> Eulerian
+    assert greedy.call_count == 2              # fastest + balanced -> greedy

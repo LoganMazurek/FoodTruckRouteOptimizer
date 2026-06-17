@@ -7,7 +7,7 @@ import pickle
 import networkx as nx
 
 from build_urls import get_google_maps_url
-from find_route import clean_up_graph, find_route_cpp, find_route_max_coverage_optimized, simplify_graph, prune_common_sense_nodes
+from find_route import clean_up_graph, find_route_cpp, find_route_eulerian_drivable, find_route_max_coverage_optimized, simplify_graph, prune_common_sense_nodes
 from get_street_data import extract_nodes_and_ways, fetch_overpass_data, get_coordinates
 from utils import cleanup_old_temp_files
 
@@ -22,6 +22,10 @@ if not secret_key:
 app.secret_key = secret_key
 GRAPH_DIR = os.path.join(os.path.dirname(__file__), "temp")
 NODE_SNAP_DISTANCE_M = 18
+# Above this many odd-degree nodes, skip the Eulerian (Chinese-Postman) route for
+# the Maximum Coverage variant -- nx.eulerize's odd-node matching is ~O(n^3) and
+# gets slow on large, dead-end-heavy graphs. Falls back to the greedy walk.
+EULERIZE_MAX_ODD_NODES = 200
 # Per-session pickles in temp/ have no expiry; reclaim abandoned ones older than
 # this (hours). Override with TEMP_FILE_MAX_AGE_HOURS in the environment.
 TEMP_FILE_MAX_AGE_HOURS = int(os.environ.get("TEMP_FILE_MAX_AGE_HOURS", "24"))
@@ -397,9 +401,32 @@ def result():
             'speed_priority': priority,
             'node_snap_distance_m': NODE_SNAP_DISTANCE_M,
         }
-        
+        # Balanced route: enable the benchmarked drivability improvement
+        # (reward going straight) and measure coverage by street length.
+        if priority == 'balanced':
+            settings_for_route['straight_bonus'] = 15.0
+            settings_for_route['coverage_by_length'] = True
+
         logger.info(f"[RESULT] Generating {name} with speed_priority={priority}, min_street_length={min_length_for_route}m")
-        route_result = find_route_max_coverage_optimized(route_graph, start_node, end_node, settings=settings_for_route)
+
+        # Maximum Coverage (thorough): use the Chinese-Postman (Eulerian) backbone
+        # for full coverage with minimal backtracking. Only for the return-to-start
+        # (loop) case, and only when nx.eulerize's odd-degree matching is tractable;
+        # otherwise fall back to the greedy coverage walk.
+        use_eulerian = priority == 'thorough' and (end_node is None or end_node == start_node)
+        if use_eulerian:
+            odd_nodes = sum(1 for n in route_graph.nodes if route_graph.degree(n) % 2 == 1)
+            if odd_nodes > EULERIZE_MAX_ODD_NODES:
+                logger.info(
+                    f"[RESULT] {name}: {odd_nodes} odd-degree nodes exceeds eulerize guard "
+                    f"({EULERIZE_MAX_ODD_NODES}), using greedy coverage walk"
+                )
+                use_eulerian = False
+
+        if use_eulerian:
+            route_result = find_route_eulerian_drivable(route_graph, start_node, end_node)
+        else:
+            route_result = find_route_max_coverage_optimized(route_graph, start_node, end_node, settings=settings_for_route)
         
         # Handle dict return format with coverage metadata
         if isinstance(route_result, dict):
