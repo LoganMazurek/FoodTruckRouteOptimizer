@@ -203,8 +203,9 @@ def test_result_duration_uses_node_path_for_intermediate_heavy_edges(client, moc
 
 
 def test_result_uses_eulerian_for_thorough_loop(client, mocker):
-    """With no end node (return-to-start), the Maximum Coverage variant should be
-    built by the Eulerian route; the other variants use the greedy walk."""
+    """The Maximum Coverage variant is always built by the Eulerian route (the
+    end point is ignored for it, even when one is selected); the other variants
+    use the greedy walk."""
     import uuid
     import networkx as nx
     boundary_id = str(uuid.uuid4())
@@ -232,7 +233,8 @@ def test_result_uses_eulerian_for_thorough_loop(client, mocker):
     euler = mocker.patch('app.find_route_eulerian_drivable', return_value=result_dict)
     mocker.patch('app.prune_common_sense_nodes', return_value=[(41.0, -88.0), (41.0, -88.05)])
 
-    resp = client.get(f'/result?boundary_id={boundary_id}&start_node=1')  # no end_node
+    # Distinct end node selected -- Maximum Coverage should still use Eulerian.
+    resp = client.get(f'/result?boundary_id={boundary_id}&start_node=1&end_node=3')
     assert resp.status_code == 200
-    euler.assert_called_once()                 # thorough -> Eulerian
+    euler.assert_called_once()                 # thorough -> Eulerian (end node ignored)
     assert greedy.call_count == 2              # fastest + balanced -> greedy

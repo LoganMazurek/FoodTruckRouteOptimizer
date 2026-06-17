@@ -410,10 +410,11 @@ def result():
         logger.info(f"[RESULT] Generating {name} with speed_priority={priority}, min_street_length={min_length_for_route}m")
 
         # Maximum Coverage (thorough): use the Chinese-Postman (Eulerian) backbone
-        # for full coverage with minimal backtracking. Only for the return-to-start
-        # (loop) case, and only when nx.eulerize's odd-degree matching is tractable;
-        # otherwise fall back to the greedy coverage walk.
-        use_eulerian = priority == 'thorough' and (end_node is None or end_node == start_node)
+        # for full coverage with minimal backtracking. The end point isn't
+        # important for this variant, so we always return-to-start here regardless
+        # of any selected end node. Only skipped when nx.eulerize's odd-degree
+        # matching would be too slow; then we fall back to the greedy walk.
+        use_eulerian = priority == 'thorough'
         if use_eulerian:
             odd_nodes = sum(1 for n in route_graph.nodes if route_graph.degree(n) % 2 == 1)
             if odd_nodes > EULERIZE_MAX_ODD_NODES:
@@ -424,7 +425,8 @@ def result():
                 use_eulerian = False
 
         if use_eulerian:
-            route_result = find_route_eulerian_drivable(route_graph, start_node, end_node)
+            # Return-to-start circuit; the end node is intentionally ignored.
+            route_result = find_route_eulerian_drivable(route_graph, start_node, start_node)
         else:
             route_result = find_route_max_coverage_optimized(route_graph, start_node, end_node, settings=settings_for_route)
         
