@@ -1,0 +1,14 @@
+# Build context exclusions — keep the image small and avoid baking in
+# host-local state. temp/ and data/ are bind-mounted at runtime instead.
+.git
+.gitignore
+venv
+__pycache__
+*.pyc
+*.pyo
+temp
+data
+.env
+.pytest_cache
+*.log
+tests

@@ -1,6 +1,53 @@
 # Deployment & Troubleshooting Guide
 
-## Quick Redeploy
+This app supports two deployment styles on the DigitalOcean droplet:
+
+- **Docker (recommended)** — matches the Kona-AI-ML setup on the same droplet:
+  the app runs in a container, while the host nginx + certbot handle the
+  `nroute.loganmazurek.com` domain and SSL. See **Docker Deployment** below.
+- **Bare-metal (legacy)** — `deploy.sh` runs the app under supervisor in a
+  host virtualenv. Still supported; see **Quick Redeploy**.
+
+Both styles use the *same* host nginx site and certbot certificate — the app
+always listens on `127.0.0.1:5001` and nginx proxies to it.
+
+## Docker Deployment
+
+The container serves the app with Waitress on port 5001 (the same server and
+port the supervisor setup used), so the existing nginx site needs no changes.
+
+```bash
+cd /home/ubuntu/FoodTruckRouteOptimizer
+git pull origin main
+
+# One-time: create a stable secret so sessions survive restarts.
+cp .env.example .env
+sed -i "s/change-me/$(openssl rand -hex 32)/" .env
+
+# Build and start (or rebuild after a code change):
+docker compose up -d --build
+```
+
+`temp/` (session pickles) and `data/cache/` (SQLite OSM cache) are bind-mounted,
+so they persist across rebuilds. `restart: unless-stopped` replaces supervisor's
+autorestart.
+
+### Migrating from the supervisor/venv setup
+
+```bash
+# Stop and remove the old host process
+sudo supervisorctl stop flask
+sudo rm -f /etc/supervisor/conf.d/flask.conf
+sudo supervisorctl reread && sudo supervisorctl update
+
+# Bring up the container (see above)
+docker compose up -d --build
+```
+
+Nginx and certbot are untouched — the site keeps proxying to `127.0.0.1:5001`
+and certbot's systemd timer keeps renewing the certificate.
+
+## Quick Redeploy (bare-metal / supervisor)
 
 After pushing changes to GitHub, SSH into your server and run:
 
