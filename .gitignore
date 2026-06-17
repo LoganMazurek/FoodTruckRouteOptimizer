@@ -406,3 +406,6 @@ FodyWeavers.xsd
 
 API_KEY.py
 venv/*
+
+# Docker secrets (SECRET_KEY for docker-compose)
+.env

@@ -1,0 +1,21 @@
+services:
+  foodtruck:
+    build: .
+    container_name: foodtruck
+    restart: unless-stopped
+    ports:
+      # host:container — the host nginx site (nroute.loganmazurek.com)
+      # already proxies to 127.0.0.1:5001, so nothing else changes.
+      - "5001:5001"
+    environment:
+      FLASK_ENV: "production"
+      # Set a stable SECRET_KEY in .env so sessions survive restarts.
+      # NEVER hardcode it here — .env is gitignored.
+      SECRET_KEY: "${SECRET_KEY}"
+    volumes:
+      # Persist session pickles and the SQLite OSM cache across rebuilds.
+      - ./temp:/app/temp
+      - ./data/cache:/app/data/cache
+    # NetworkX graph building is memory-heavy; cap it so this container
+    # can't starve Kona on the same droplet. Tune to your droplet size.
+    mem_limit: 1g
