@@ -225,25 +225,41 @@ def expand_route_with_geometry(route_path, graph):
         return [(graph.nodes[n]['coordinates'][0], graph.nodes[n]['coordinates'][1]) for n in route_path]
     
     expanded_coords = []
-    expanded_coords.append(tuple(graph.nodes[route_path[0]]['coordinates']))
-    
+
+    def _append(coord):
+        # Drop consecutive duplicate points: they add no geometry and confuse
+        # navigation apps (each duplicate becomes a degenerate via-point).
+        coord = tuple(coord)
+        if not expanded_coords or expanded_coords[-1] != coord:
+            expanded_coords.append(coord)
+
+    _append(graph.nodes[route_path[0]]['coordinates'])
+
     for i in range(1, len(route_path)):
         curr_node = route_path[i - 1]
         next_node = route_path[i]
-        
+
         # Get intermediate node coordinates for this edge
         if graph.has_edge(curr_node, next_node):
             edge_data = graph[curr_node][next_node]
             intermediate_coords = edge_data.get('intermediate_nodes', [])
-            
-            # Add all intermediate node coordinates
+
+            # intermediate_nodes are stored in the orientation they were built
+            # (from 'geom_from'). The graph is undirected, so when the route
+            # traverses this edge in the opposite direction we must reverse them,
+            # otherwise the geometry jumps to the far endpoint and walks the arc
+            # backwards -- a zig-zag that navigation apps turn into a U-turn.
+            geom_from = edge_data.get('geom_from')
+            if geom_from is not None and geom_from != curr_node:
+                intermediate_coords = list(reversed(intermediate_coords))
+
             for coord in intermediate_coords:
                 if coord:  # Skip None/empty entries
-                    expanded_coords.append(tuple(coord))
-        
+                    _append(coord)
+
         # Add the next endpoint
-        expanded_coords.append(tuple(graph.nodes[next_node]['coordinates']))
-    
+        _append(graph.nodes[next_node]['coordinates'])
+
     logger.debug(f"[EXPAND_ROUTE] Expanded route from {len(route_path)} to {len(expanded_coords)} points")
     return expanded_coords
 
@@ -484,7 +500,10 @@ def simplify_graph(nodes, ways, settings=None, start_node=None, end_node=None):
                         weight=total_distance,
                         way_id=way_id,
                         way_length=total_way_length,  # Store full way length for debugging
-                        intermediate_nodes=intermediate_coords  # Store coordinates, not node IDs
+                        intermediate_nodes=intermediate_coords,  # Store coordinates, not node IDs
+                        geom_from=start_node  # Endpoint the intermediate_nodes are ordered FROM;
+                                              # lets expand_route_with_geometry orient them by
+                                              # travel direction (the graph itself is undirected).
                     )
                     edges_added += 1
                     break

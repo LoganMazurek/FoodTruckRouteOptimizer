@@ -80,3 +80,44 @@ def test_simplify_graph_merges_very_close_nodes():
 
     assert graph.number_of_nodes() == 2
     assert graph.number_of_edges() == 1
+
+
+def test_expand_route_orients_intermediates_by_travel_direction():
+    """Intermediate edge geometry must follow the direction of travel, not the
+    order it was stored in. Otherwise reverse-direction traversal zig-zags and
+    navigation apps insert spurious U-turns."""
+    import networkx as nx
+    from find_route import expand_route_with_geometry
+
+    G = nx.Graph()
+    G.add_node('A', coordinates=(0.0, 0.000))
+    G.add_node('B', coordinates=(0.0, 0.004))
+    arc = [(0.001, 0.001), (0.002, 0.002), (0.001, 0.003)]
+    G.add_edge('A', 'B', intermediate_nodes=arc, geom_from='A')
+
+    fwd = expand_route_with_geometry(['A', 'B'], G)
+    rev = expand_route_with_geometry(['B', 'A'], G)
+
+    # Reverse traversal is exactly the forward path reversed (no jump-back).
+    assert rev == list(reversed(fwd))
+    # And the arc is monotonic in lon for each direction (no backtrack spike).
+    assert [p[1] for p in fwd] == sorted(p[1] for p in fwd)
+    assert [p[1] for p in rev] == sorted((p[1] for p in rev), reverse=True)
+
+
+def test_expand_route_drops_consecutive_duplicate_points():
+    import networkx as nx
+    from find_route import expand_route_with_geometry
+
+    G = nx.Graph()
+    G.add_node(1, coordinates=(0.0, 0.0))
+    G.add_node(2, coordinates=(0.0, 0.001))
+    G.add_node(3, coordinates=(0.0, 0.002))
+    # Empty intermediates so the shared endpoint (node 2) is the only join.
+    G.add_edge(1, 2, intermediate_nodes=[], geom_from=1)
+    G.add_edge(2, 3, intermediate_nodes=[], geom_from=2)
+
+    out = expand_route_with_geometry([1, 2, 3], G)
+    assert out == [(0.0, 0.0), (0.0, 0.001), (0.0, 0.002)]
+    # No consecutive duplicates anywhere.
+    assert all(out[i] != out[i - 1] for i in range(1, len(out)))
