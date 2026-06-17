@@ -491,6 +491,11 @@ def result():
             'description': description,
             'waypoints': pruned_route,
             'geometry': pruned_route,  # Use waypoints for map display (cleaner, works with Leaflet)
+            # Full, dense road-following geometry (intermediate OSM nodes expanded back
+            # in by find_route_max_coverage_optimized). Used for GPX export so navigation
+            # apps follow the actual coverage route street-by-street instead of straight
+            # lines between intersections. See export_gpx().
+            'track': optimized_route,
             'instructions': consolidate_turn_by_turn(turn_by_turn_instructions),
             'route_info': route_info
         })
@@ -700,6 +705,22 @@ def export_gpx():
     duration_min = route_info.get('total_duration_min', 0)
     route_name = route_data['name']
     
+    # Emit a single <trk> with the full, dense road-following geometry.
+    #
+    # We deliberately export ONLY a track (no standalone <wpt> pins and no <rte>):
+    # navigation apps such as OsmAnd import a file containing a <trk> as a track
+    # ("trail") and, with "Follow track + Calculate route between points (Car)",
+    # walk its points in order. Because this is a coverage (Chinese-Postman-style)
+    # route that intentionally re-drives streets, the geometry must be DENSE so the
+    # router has no room to shortcut/optimize across blocks and drop a revisit --
+    # hence 'track' (the expanded route) rather than the pruned 'geometry'.
+    # Mixing <wpt>/<rte> into the same file previously made OsmAnd treat it as a
+    # plain track with no progression, so they are omitted on purpose.
+    track = (route_data.get('track')
+             or route_data.get('geometry')
+             or route_data.get('waypoints')
+             or [])
+
     gpx_content = '<?xml version="1.0" encoding="UTF-8"?>\n'
     gpx_content += '<gpx version="1.1" creator="FoodTruckRouteOptimizer" xmlns="http://www.topografix.com/GPX/1/1">\n'
     gpx_content += f'  <metadata>\n'
@@ -707,41 +728,15 @@ def export_gpx():
     gpx_content += f'    <desc>Route: {distance_miles} miles, {duration_min:.0f} min. {route_data["description"]}</desc>\n'
     gpx_content += f'    <time>{datetime.utcnow().isoformat()}Z</time>\n'
     gpx_content += f'  </metadata>\n'
-    
-    # Add waypoints
-    waypoints = route_data.get('waypoints', [])
-    for i, (lat, lon) in enumerate(waypoints):
-        name = 'Start' if i == 0 else ('End' if i == len(waypoints) - 1 else f'Waypoint {i}')
-        gpx_content += f'  <wpt lat="{lat}" lon="{lon}">\n'
-        gpx_content += f'    <name>{name}</name>\n'
-        gpx_content += f'  </wpt>\n'
-    
-    # Add route track (full geometry)
-    geometry = route_data.get('geometry')
-    if geometry:
-        gpx_content += '  <trk>\n'
-        gpx_content += f'    <name>{route_name}</name>\n'
-        gpx_content += '    <trkseg>\n'
-        for lat, lon in geometry:
-            gpx_content += f'      <trkpt lat="{lat}" lon="{lon}"></trkpt>\n'
-        gpx_content += '    </trkseg>\n'
-        gpx_content += '  </trk>\n'
-    
-    # Add route with turn-by-turn instructions as route points
-    instructions = route_data.get('instructions', [])
-    if instructions and waypoints:
-        gpx_content += '  <rte>\n'
-        gpx_content += '    <name>Turn-by-Turn Route</name>\n'
-        for i, (lat, lon) in enumerate(waypoints):
-            gpx_content += f'    <rtept lat="{lat}" lon="{lon}">\n'
-            if i < len(instructions):
-                inst = instructions[i]
-                gpx_content += f'      <name>{inst.get("instruction", "Continue")}</name>\n'
-                if inst.get('name'):
-                    gpx_content += f'      <desc>onto {inst["name"]}</desc>\n'
-            gpx_content += f'    </rtept>\n'
-        gpx_content += '  </rte>\n'
-    
+
+    gpx_content += '  <trk>\n'
+    gpx_content += f'    <name>{route_name}</name>\n'
+    gpx_content += '    <trkseg>\n'
+    for lat, lon in track:
+        gpx_content += f'      <trkpt lat="{lat}" lon="{lon}"></trkpt>\n'
+    gpx_content += '    </trkseg>\n'
+    gpx_content += '  </trk>\n'
+
     gpx_content += '</gpx>'
     
     # Return as downloadable file with route-specific filename
